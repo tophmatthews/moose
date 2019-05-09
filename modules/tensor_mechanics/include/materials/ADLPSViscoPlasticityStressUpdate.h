@@ -65,12 +65,8 @@ public:
   virtual Real computeReferenceResidual(const ADReal & effective_trial_stress,
                                         const ADReal & scalar_effective_inelastic_strain) override;
 
-  virtual Real minimumPermissibleValue(const ADReal & /*effective_trial_stress*/) const override
-  {
-    return 0.0;
-  }
-
   virtual Real maximumPermissibleValue(const ADReal & effective_trial_stress) const override;
+  virtual Real minimumPermissibleValue(const ADReal & effective_trial_stress) const override;
 
   /**
    * Compute the limiting value of the time step for this material
@@ -127,29 +123,45 @@ protected:
   void outputIterationSummary(std::stringstream * iter_output,
                               const unsigned int total_it) override;
 
-  void
-  computeGaugeStress(const ADReal & hydro_stress, const ADReal & eq_stress, ADReal & gauge_stress);
+  ADReal computeM(const ADReal & hydro_stress,
+                  const ADReal & gauge_stress,
+                  const unsigned int derivative = 0);
 
-  void computeBisectionSolve(const ADReal & hydro_stress,
-                             const ADReal & eq_stress,
-                             ADReal & gauge_stress);
+  ADReal computeH(const Real n, const ADReal & M, const bool derivative = false);
 
-  ADReal computeGaugeStressResidual(const ADReal & hydro_stress,
-                                    const ADReal & equiv_stress,
-                                    const ADReal & gauge_stress);
-  ADReal computeGaugeStressDerivative(const ADReal & hydro_stress,
+  ADReal computePowerLawConstant();
+
+  ADRankTwoTensor computeDGaugeDSigma(const ADReal & gauge_stress,
                                       const ADReal & equiv_stress,
-                                      const ADReal & gauge_stress);
-  ADReal computeH(const ADReal & M, const bool derivative = false);
+                                      const ADRankTwoTensor & dev_stress,
+                                      const ADRankTwoTensor & stress,
+                                      const Real n);
 
-  /// 3 * shear modulus
-  Real _three_shear_modulus;
+  void computeNStrainRate(ADReal & gauge_stress,
+                          ADReal & dpsi_dgauge,
+                          ADRankTwoTensor & strain_rate,
+                          const ADReal & equiv_stress,
+                          const ADRankTwoTensor & dev_stress,
+                          const ADRankTwoTensor & stress,
+                          const Real n);
 
+  ///@{ Effective inelastic strain material property
   ADMaterialProperty(Real) & _effective_inelastic_strain;
   const MaterialProperty<Real> & _effective_inelastic_strain_old;
+  ///@}
 
+  /// Gauge stress
+  ADMaterialProperty(Real) & _gauge_stress;
+
+  ///@{ Creep strain material property
+  ADMaterialProperty(RankTwoTensor) & _creep_strain;
+  const MaterialProperty<RankTwoTensor> & _creep_strain_old;
+  ///@}
+
+  ///@{ Porosity material property
   ADMaterialProperty(Real) & _porosity;
   const MaterialProperty<Real> & _porosity_old;
+  ///@}
 
   /// Max increment for inelastic strain
   Real _max_inelastic_increment;
@@ -169,25 +181,26 @@ protected:
   /// Gas constant for exp term
   const Real _gas_constant;
 
+  /// Initial porosity to setup stateful materials
+  const Real _initial_porosity;
+
+  /// Flag to enable verbose output
+  const bool _verbose;
+
+  /// Container for hydrostatic stress
+  ADReal _hydro_stress;
+
+  /// Rank two identity tensor
+  const RankTwoTensor _identity_two;
+
+  /// Derivative of hydrostatic stress with respect to the stress tensor
+  const RankTwoTensor _dhydro_stress_dsigma;
+
   /// Container for _derivative
   ADReal _derivative;
 
-  /// Creep strain material property
-  ADMaterialProperty(RankTwoTensor) & _creep_strain;
-  const MaterialProperty<RankTwoTensor> & _creep_strain_old;
-
-  const bool _verbose;
-
-  const Real _initial_porosity;
-
-  const unsigned int _max_its;
-
-  const RankTwoTensor _identity_two;
-  const RankTwoTensor _dhydro_stress_dsigma;
-  ADReal _hydro_stress;
-  ADMaterialProperty(Real) & _gauge_stress;
-  const bool _newton;
-  const Real _abs_tol;
+  /// Container for current value of n
+  Real _current_n;
 
   usingStressUpdateBaseMembers;
   usingSingleVariableReturnMappingSolutionMembers;

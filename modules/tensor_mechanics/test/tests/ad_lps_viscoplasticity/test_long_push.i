@@ -3,10 +3,8 @@
   dim = 2
   nx = 4
   ny = 4
-  nz = 4
   xmax = 0.002
   ymax = 0.002
-  zmax = 0.002
   second_order = true
 []
 
@@ -32,7 +30,7 @@
   [./pull]
     type = PiecewiseLinear
     x = '0 1'
-    y = '0 1e-4'
+    y = '0 -1e-4'
   [../]
 []
 
@@ -57,7 +55,7 @@
     temperature = temp
     base_name = lps
     outputs = all
-    initial_porosity = 0.1
+    initial_porosity = 1e-1
   [../]
 []
 
@@ -96,22 +94,26 @@
   solve_type = NEWTON
   line_search = 'none'
 
-  end_time = 1e-1
-  dt = 1e-2
-  # [./TimeStepper]
-  #   type = SolutionTimeAdaptiveDT
-  #   dt = 1e-3
-  # [../]
+  end_time = 2
+  timestep_tolerance = 1e-6
+
+  [./TimeStepper]
+    type = IterationAdaptiveDT
+    dt = 1e-2
+    timestep_limiting_postprocessor = creep_timestep
+  [../]
 []
 
 [Postprocessors]
-  [./max_disp_x]
-    type = ElementExtremeValue
+  [./disp_x]
+    type = SideAverageValue
     variable = disp_x
+    boundary = right
   [../]
-  [./max_disp_y]
-    type = ElementExtremeValue
+  [./disp_y]
+    type = SideAverageValue
     variable = disp_y
+    boundary = top
   [../]
   [./max_hydro]
     type = ElementExtremeValue
@@ -144,11 +146,9 @@
   [../]
   [./num_lin]
     type = NumLinearIterations
-    outputs = console
   [../]
   [./num_nonlin]
     type = NumNonlinearIterations
-    outputs = console
   [../]
   [./lps_eff_creep_strain]
     type = ElementAverageValue
@@ -159,10 +159,19 @@
     variable = porosity
     execute_on = 'TIMESTEP_END initial'
   [../]
+  [./volume]
+    type = VolumePostprocessor
+    use_displaced_mesh = true
+  [../]
+  [./creep_timestep]
+    type = MaterialTimeStepPostprocessor
+  [../]
 []
 
 [Outputs]
+  execute_on = 'TIMESTEP_END'
   exodus = true
   print_linear_residuals = false
   perf_graph = true
+  csv = true
 []

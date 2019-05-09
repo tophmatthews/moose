@@ -1,0 +1,41 @@
+[Tests]
+  [./test]
+    type = Exodiff
+    input = 'test.i'
+    exodiff = 'test_out.e'
+    #issues = '#7228 #13260'
+    #design = '/ADComputeFiniteStrain.md'
+    #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a tensile test simulation in 3D using AD and match non-AD methods'
+  [../]
+  [./test-jac]
+    type = PetscJacobianTester
+    skip = 'Jacobian not set up fully'
+    input = 'test.i'
+    run_sim = 'True'
+    prereq = 'test'
+    #ratio_tol = 5e-8
+    #difference_tol = 1
+    petsc_version = '>=3.9.4'
+    #issues = '#12650 #13260'
+    #design = 'jacobian_definitions.md'
+    #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a bar bending simulation in 2D using AD and calculate perfect Jacobians'
+  [../]
+  [./test_long]
+    type = CSVDiff
+    input = 'test_long.i'
+    csvdiff = 'test_long_out.csv'
+    heavy = true
+    #issues = '#7228 #13260'
+    #design = '/ADComputeFiniteStrain.md'
+    #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a tensile test simulation in 3D using AD and match non-AD methods'
+  [../]
+  [./test_long_push]
+    type = CSVDiff
+    input = 'test_long_push.i'
+    csvdiff = 'test_long_push_out.csv'
+    heavy = true
+    #issues = '#7228 #13260'
+    #design = '/ADComputeFiniteStrain.md'
+    #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a tensile test simulation in 3D using AD and match non-AD methods'
+  [../]
+[]

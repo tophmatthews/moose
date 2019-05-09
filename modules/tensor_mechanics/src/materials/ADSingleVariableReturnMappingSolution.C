@@ -411,8 +411,8 @@ ADSingleVariableReturnMappingSolution<compute_stage>::outputIterationSummary(
     std::stringstream * iter_output, const unsigned int total_it)
 {
   if (iter_output)
-    *iter_output << "In " << total_it << " iterations the residual went from " << _initial_residual
-                 << " to " << _residual << " in '" << _svrms_name << "'.\n";
+    *iter_output << "In " << total_it << " iterations the residual went from " << MetaPhysicL::raw_value(_initial_residual)
+                 << " to " << MetaPhysicL::raw_value(_residual) << " in '" << _svrms_name << "'.\n";
 }
 
 // explicit instantiation is required for AD base classes
