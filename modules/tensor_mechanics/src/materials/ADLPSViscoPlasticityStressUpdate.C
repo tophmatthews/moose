@@ -26,17 +26,10 @@ defineADValidParams(
         "effective_inelastic_strain_name",
         "effective_creep_strain",
         "Name of the material property that stores the effective inelastic strain");
-    params.addRequiredCoupledVar("temperature", "Coupled temperature");
-    params.addRequiredRangeCheckedParam<Real>("coefficient",
-                                              "coefficient>=0.0",
-                                              "Leading coefficient in power-law equation");
-    params.addRequiredRangeCheckedParam<Real>("n_exponent",
-                                              "n_exponent>0.0",
-                                              "Exponent on effective stress in power-law equation");
-    params.addRequiredRangeCheckedParam<Real>("activation_energy",
-                                              "activation_energy>0",
-                                              "Activation energy");
-    params.addParam<Real>("gas_constant", 8.3143, "Universal gas constant");
+    params.addRequiredParam<std::vector<MaterialPropertyName>>("coefficients",
+                                               "Leading coefficient in power-law equation");
+    params.addRequiredParam<std::vector<Real>>(
+        "powers", "Exponent on effective stress in power-law equation");
     params.addParam<bool>("verbose", false, "Flag to output verbose information");
     params.addRangeCheckedParam<Real>(
         "initial_porosity", 0.0, "initial_porosity>0.0", "Initial porosity");
@@ -58,20 +51,31 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::ADLPSViscoPlasticityStressUpdat
     _porosity(adDeclareADProperty<Real>("porosity")),
     _porosity_old(adGetMaterialPropertyOld<Real>("porosity")),
     _max_inelastic_increment(adGetParam<Real>("max_inelastic_increment")),
-    _temperature(adCoupledValue("temperature")),
-    _coefficient(adGetParam<Real>("coefficient")),
-    _n(adGetParam<Real>("n_exponent")),
-    _activation_energy(adGetParam<Real>("activation_energy")),
-    _gas_constant(adGetParam<Real>("gas_constant")),
+    _powers(adGetParam<std::vector<Real>>("powers")),
+    _num_models(_powers.size()),
+    _coefficients(_num_models),
     _initial_porosity(adGetParam<Real>("initial_porosity")),
     _verbose(adGetParam<bool>("verbose")),
     _hydro_stress(0.0),
     _identity_two(RankTwoTensor::initIdentity),
     _dhydro_stress_dsigma(_identity_two / 3.0),
     _derivative(0.0),
-    _current_n(0.0)
+    _current_n(0.0),
+    _current_activation_energy(0.0),
+    _current_coefficient(0.0)
 {
   _check_range = true;
+
+  std::vector<MaterialPropertyName> coeff_names = adGetParam<std::vector<MaterialPropertyName> >("coefficients");
+  if (_num_models != coeff_names.size())
+    paramError("power",
+               "In ",
+               _name,
+               ": Number of powers and number of coefficients must be the same!");
+  for (unsigned int i = 0; i < _num_models; ++i)
+  {
+    _coefficients[i] = &adGetADMaterialProperty<Real>(coeff_names[i]);
+  }
 }
 
 template <ComputeStage compute_stage>
@@ -116,13 +120,19 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::updateState(
     _hydro_stress = stress.trace() / 3.0;
 
     ADRankTwoTensor strain_rate;
-    ADReal dpsi_dgauge;
-    computeNStrainRate(
-        _gauge_stress[_qp], dpsi_dgauge, strain_rate, equiv_stress, dev_stress, stress, _n);
+    strain_rate.zero();
+    ADReal dpsi_dgauge(0);
+    ADReal sum_dpsi_dgauge(0);
+    for (unsigned int i = 0; i < _num_models; ++i)
+    {
+      computeNStrainRate(
+          _gauge_stress[_qp], dpsi_dgauge, strain_rate, equiv_stress, dev_stress, stress, i);
+      sum_dpsi_dgauge += dpsi_dgauge;
+    }
 
     inelastic_strain_increment = strain_rate * _dt;
     strain_increment -= inelastic_strain_increment;
-    _effective_inelastic_strain[_qp] = _effective_inelastic_strain_old[_qp] + dpsi_dgauge * _dt;
+    _effective_inelastic_strain[_qp] = _effective_inelastic_strain_old[_qp] + sum_dpsi_dgauge * _dt;
   }
 
   stress = elasticity_tensor * (elastic_strain_old + strain_increment);
@@ -212,8 +222,7 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::computeResidual(const ADReal & 
 
   const ADReal dM_dgauge_stress = computeM(_hydro_stress, trial_gauge, 2);
   const ADReal dh_dM = computeH(_current_n, M, true);
-  const ADReal dres_dh =
-      2.0 * _porosity_old[_qp] * (1.0 - n_mp / Utility::pow<2>(h));
+  const ADReal dres_dh = 2.0 * _porosity_old[_qp] * (1.0 - n_mp / Utility::pow<2>(h));
   const ADReal dres_dgauge_stress_left =
       -2.0 * Utility::pow<2>(trial_gauge) / Utility::pow<3>(trial_gauge);
   _derivative = dres_dgauge_stress_left + dres_dh * dh_dM * dM_dgauge_stress;
@@ -243,7 +252,9 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::computeDerivative(const ADReal 
 
 template <ComputeStage compute_stage>
 ADReal
-ADLPSViscoPlasticityStressUpdate<compute_stage>::computeH(const Real n, const ADReal & M, const bool derivative)
+ADLPSViscoPlasticityStressUpdate<compute_stage>::computeH(const Real n,
+                                                          const ADReal & M,
+                                                          const bool derivative)
 {
   if (derivative)
     return (n + 1.0) / n * std::pow(M, 1.0 / n) *
@@ -265,13 +276,6 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::computeM(const ADReal & hydro_s
     return -3.0 / 2.0 * std::abs(hydro_stress) / gauge_stress / gauge_stress;
   else
     mooseError("In ", _name, ": Internal error in ADLPSViscoPlasticityStressUpdate::computeM");
-}
-
-template <ComputeStage compute_stage>
-ADReal
-ADLPSViscoPlasticityStressUpdate<compute_stage>::computePowerLawConstant()
-{
-  return _coefficient * std::exp(-_activation_energy / _gas_constant / _temperature[_qp]);
 }
 
 template <ComputeStage compute_stage>
@@ -311,10 +315,10 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::computeNStrainRate(
     const ADReal & equiv_stress,
     const ADRankTwoTensor & dev_stress,
     const ADRankTwoTensor & stress,
-    const Real n)
+    const unsigned int i)
 {
-  // Set current exponent power for residual and derivative calculations
-  _current_n = n;
+  // Set model parameters for evaluations
+  _current_n = _powers[i];
 
   // Run non-linear solve for gauge stress
   returnMappingSolve(equiv_stress, gauge_stress, _console);
@@ -324,8 +328,8 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::computeNStrainRate(
                _name,
                ": Gauge stress is less than zero. Something is wrong with the inner Newton solve");
 
-  dpsi_dgauge = computePowerLawConstant() * std::pow(gauge_stress, n);
+  dpsi_dgauge = (*_coefficients[i])[_qp] * std::pow(gauge_stress, _current_n);
 
-  strain_rate =
-      dpsi_dgauge * computeDGaugeDSigma(gauge_stress, equiv_stress, dev_stress, stress, n);
+  strain_rate +=
+      dpsi_dgauge * computeDGaugeDSigma(gauge_stress, equiv_stress, dev_stress, stress, _current_n);
 }

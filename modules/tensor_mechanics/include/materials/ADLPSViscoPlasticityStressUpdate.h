@@ -129,8 +129,6 @@ protected:
 
   ADReal computeH(const Real n, const ADReal & M, const bool derivative = false);
 
-  ADReal computePowerLawConstant();
-
   ADRankTwoTensor computeDGaugeDSigma(const ADReal & gauge_stress,
                                       const ADReal & equiv_stress,
                                       const ADRankTwoTensor & dev_stress,
@@ -143,7 +141,7 @@ protected:
                           const ADReal & equiv_stress,
                           const ADRankTwoTensor & dev_stress,
                           const ADRankTwoTensor & stress,
-                          const Real n);
+                          const unsigned int i);
 
   ///@{ Effective inelastic strain material property
   ADMaterialProperty(Real) & _effective_inelastic_strain;
@@ -166,20 +164,14 @@ protected:
   /// Max increment for inelastic strain
   Real _max_inelastic_increment;
 
-  /// Temperature variable value
-  const ADVariableValue & _temperature;
+  /// Exponent on the effective stress
+  const std::vector<Real> _powers;
+
+  /// Number of total models
+  const unsigned int _num_models;
 
   /// Leading coefficient
-  const Real _coefficient;
-
-  /// Exponent on the effective stress
-  const Real _n;
-
-  /// Activation energy for exp term
-  const Real _activation_energy;
-
-  /// Gas constant for exp term
-  const Real _gas_constant;
+  std::vector<const ADMaterialProperty(Real) *> _coefficients;
 
   /// Initial porosity to setup stateful materials
   const Real _initial_porosity;
@@ -199,8 +191,11 @@ protected:
   /// Container for _derivative
   ADReal _derivative;
 
-  /// Container for current value of n
+  ///@{ Containers for current model parameters
   Real _current_n;
+  Real _current_activation_energy;
+  Real _current_coefficient;
+  ///@}
 
   usingStressUpdateBaseMembers;
   usingSingleVariableReturnMappingSolutionMembers;

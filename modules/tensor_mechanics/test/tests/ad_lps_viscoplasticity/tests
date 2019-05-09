@@ -7,6 +7,14 @@
     #design = '/ADComputeFiniteStrain.md'
     #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a tensile test simulation in 3D using AD and match non-AD methods'
   [../]
+  [./test_two_model]
+    type = Exodiff
+    input = 'test_two_model.i'
+    exodiff = 'test_two_model_out.e'
+    #issues = '#7228 #13260'
+    #design = '/ADComputeFiniteStrain.md'
+    #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a tensile test simulation in 3D using AD and match non-AD methods'
+  [../]
   [./test-jac]
     type = PetscJacobianTester
     skip = 'Jacobian not set up fully'

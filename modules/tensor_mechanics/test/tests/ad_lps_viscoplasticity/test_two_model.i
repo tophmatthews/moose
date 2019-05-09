@@ -50,17 +50,17 @@
 
   [./lps]
     type = ADLPSViscoPlasticityStressUpdate
-    coefficients = coef
-    powers = 3
+    coefficients = 'coef_half coef_half'
+    powers = '3 3'
     base_name = lps
     outputs = all
     initial_porosity = 0.1
   [../]
-  [./coef]
+  [./coef_half]
     type = ParsedMaterial
     args = temp
-    f_name = coef
-    function = '8e-20 * exp(-28500 / 1.987 / 1200)'
+    f_name = coef_half
+    function = '4e-20 * exp(-28500 / 1.987 / 1200)'
   [../]
 []
 
