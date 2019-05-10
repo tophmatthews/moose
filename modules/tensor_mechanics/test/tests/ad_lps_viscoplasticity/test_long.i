@@ -12,13 +12,6 @@
 
 [GlobalParams]
   displacements = 'disp_x disp_y'
-  volumetric_locking_correction = false
-[]
-
-[AuxVariables]
-  [./temp]
-    initial_condition = 800
-  [../]
 []
 
 [Modules/TensorMechanics/Master/All]
@@ -55,10 +48,10 @@
     base_name = lps
     outputs = all
     initial_porosity = 0.1
+    relative_tolerance = 1e-13
   [../]
   [./coef]
     type = ParsedMaterial
-    args = temp
     f_name = coef
     function = '8e-20 * exp(-28500 / 1.987 / 1200)'
   [../]
@@ -97,14 +90,13 @@
 [Executioner]
   type = Transient
   solve_type = NEWTON
-  line_search = 'none'
 
   end_time = 2
   timestep_tolerance = 1e-6
 
   [./TimeStepper]
     type = IterationAdaptiveDT
-    dt = 1e-2
+    dt = 1e-3
     timestep_limiting_postprocessor = creep_timestep
   [../]
 []
@@ -151,9 +143,21 @@
   [../]
   [./num_lin]
     type = NumLinearIterations
+    outputs = console
   [../]
   [./num_nonlin]
     type = NumNonlinearIterations
+    outputs = console
+  [../]
+  [./total_lin]
+    type = CumulativeValuePostprocessor
+    postprocessor = num_lin
+    outputs = console
+  [../]
+  [./total_nonlin]
+    type = CumulativeValuePostprocessor
+    postprocessor = num_nonlin
+    outputs = console
   [../]
   [./lps_eff_creep_strain]
     type = ElementAverageValue
@@ -162,7 +166,6 @@
   [./porosity]
     type = ElementAverageValue
     variable = porosity
-    execute_on = 'TIMESTEP_END initial'
   [../]
   [./volume]
     type = VolumePostprocessor
@@ -174,9 +177,10 @@
 []
 
 [Outputs]
-  execute_on = 'TIMESTEP_END'
-  exodus = true
-  print_linear_residuals = false
   perf_graph = true
-  csv = true
+  [./out]
+    type = CSV
+    sync_only = true
+    sync_times = '0.2 0.4 0.6 0.8 1.0 1.2 1.4 1.6 1.8 2.0'
+  [../]
 []

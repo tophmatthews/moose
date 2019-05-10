@@ -64,8 +64,6 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::ADLPSViscoPlasticityStressUpdat
     _current_activation_energy(0.0),
     _current_coefficient(0.0)
 {
-  _check_range = true;
-
   std::vector<MaterialPropertyName> coeff_names = adGetParam<std::vector<MaterialPropertyName> >("coefficients");
   if (_num_models != coeff_names.size())
     paramError("power",

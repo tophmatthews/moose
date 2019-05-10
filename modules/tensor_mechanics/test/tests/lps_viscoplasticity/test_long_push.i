@@ -18,7 +18,6 @@
   strain = FINITE
   add_variables = true
   generate_output = 'strain_xx strain_yy strain_xy hydrostatic_stress vonmises_stress'
-  use_automatic_differentiation = true
 []
 
 [Functions]
@@ -37,12 +36,12 @@
     poissons_ratio = 0.3
   [../]
   [./strain]
-    type = ADComputeMultipleInelasticStress
+    type = ComputeMultipleInelasticStress
     inelastic_models = lps
   [../]
 
   [./lps]
-    type = ADLPSViscoPlasticityStressUpdate
+    type = LPSViscoPlasticityStressUpdate
     coefficients = coef
     powers = 3
     base_name = lps
@@ -59,21 +58,21 @@
 
 [BCs]
   [./no_disp_x]
-    type = ADPresetBC
+    type = PresetBC
     variable = disp_x
     boundary = left
     value = 0.0
   [../]
 
   [./no_disp_y]
-    type = ADPresetBC
+    type = PresetBC
     variable = disp_y
     boundary = bottom
     value = 0.0
   [../]
 
   [./pull_disp_y]
-    type = ADFunctionPresetBC
+    type = FunctionPresetBC
     variable = disp_y
     boundary = top
     function = pull

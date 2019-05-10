@@ -12,13 +12,6 @@
 
 [GlobalParams]
   displacements = 'disp_x disp_y'
-  volumetric_locking_correction = false
-[]
-
-[AuxVariables]
-  [./temp]
-    initial_condition = 800
-  [../]
 []
 
 [Modules/TensorMechanics/Master/All]
@@ -55,10 +48,10 @@
     base_name = lps
     outputs = all
     initial_porosity = 0.1
+    relative_tolerance = 1e-11
   [../]
   [./coef]
     type = ParsedMaterial
-    args = temp
     f_name = coef
     function = '8e-20 * exp(-28500 / 1.987 / 1200)'
   [../]
@@ -97,20 +90,22 @@
 [Executioner]
   type = Transient
   solve_type = NEWTON
-  line_search = 'none'
+  l_max_its = 100
 
-  end_time = 1e-1
-  dt = 1e-2
+  num_steps = 10
+  dt = 5e-3
 []
 
 [Postprocessors]
-  [./max_disp_x]
-    type = ElementExtremeValue
+  [./disp_x]
+    type = SideAverageValue
     variable = disp_x
+    boundary = right
   [../]
-  [./max_disp_y]
-    type = ElementExtremeValue
+  [./disp_y]
+    type = SideAverageValue
     variable = disp_y
+    boundary = top
   [../]
   [./max_hydro]
     type = ElementExtremeValue
@@ -156,12 +151,15 @@
   [./porosity]
     type = ElementAverageValue
     variable = porosity
-    execute_on = 'TIMESTEP_END initial'
   [../]
 []
 
 [Outputs]
-  exodus = true
-  print_linear_residuals = false
   perf_graph = true
+  print_linear_residuals = false
+  [./out]
+    type = CSV
+    sync_only = true
+    sync_times = '0.02 0.04 0.06 0.08 0.1'
+  [../]
 []

@@ -15,20 +15,6 @@
     #design = '/ADComputeFiniteStrain.md'
     #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a tensile test simulation in 3D using AD and match non-AD methods'
   [../]
-  [./test-jac]
-    type = PetscJacobianTester
-    skip = 'Jacobian not set up fully'
-    input = 'test.i'
-    run_sim = 'True'
-    prereq = 'test'
-    #ratio_tol = 5e-8
-    #difference_tol = 1
-    petsc_version = '>=3.9.4'
-    cli_args = 'Executioner/num_steps=2'
-    #issues = '#12650 #13260'
-    #design = 'jacobian_definitions.md'
-    #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a bar bending simulation in 2D using AD and calculate perfect Jacobians'
-  [../]
   [./test_long]
     type = CSVDiff
     input = 'test_long.i'
