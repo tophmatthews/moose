@@ -122,10 +122,10 @@ protected:
   Real computeH(const Real n, const Real & M, const bool derivative = false);
 
   RankTwoTensor computeDGaugeDSigma(const Real & gauge_stress,
-                                      const Real & equiv_stress,
-                                      const RankTwoTensor & dev_stress,
-                                      const RankTwoTensor & stress,
-                                      const Real n);
+                                    const Real & equiv_stress,
+                                    const RankTwoTensor & dev_stress,
+                                    const RankTwoTensor & stress,
+                                    const Real n);
 
   void computeNStrainRate(Real & gauge_stress,
                           Real & dpsi_dgauge,
@@ -139,9 +139,6 @@ protected:
   MaterialProperty<Real> & _effective_inelastic_strain;
   const MaterialProperty<Real> & _effective_inelastic_strain_old;
   ///@}
-
-  /// Gauge stress
-  MaterialProperty<Real> & _gauge_stress;
 
   ///@{ Creep strain material property
   MaterialProperty<RankTwoTensor> & _creep_strain;
@@ -164,6 +161,9 @@ protected:
 
   /// Leading coefficient
   std::vector<const MaterialProperty<Real> *> _coefficients;
+
+  /// Gauge stress
+  std::vector<MaterialProperty<Real> *> _gauge_stresses;
 
   /// Initial porosity to setup stateful materials
   const Real _initial_porosity;

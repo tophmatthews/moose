@@ -148,9 +148,6 @@ protected:
   const MaterialProperty<Real> & _effective_inelastic_strain_old;
   ///@}
 
-  /// Gauge stress
-  ADMaterialProperty(Real) & _gauge_stress;
-
   ///@{ Creep strain material property
   ADMaterialProperty(RankTwoTensor) & _creep_strain;
   const MaterialProperty<RankTwoTensor> & _creep_strain_old;
@@ -172,6 +169,9 @@ protected:
 
   /// Leading coefficient
   std::vector<const ADMaterialProperty(Real) *> _coefficients;
+
+  /// Gauge stress
+  std::vector<ADMaterialProperty(Real) *> _gauge_stresses;
 
   /// Initial porosity to setup stateful materials
   const Real _initial_porosity;

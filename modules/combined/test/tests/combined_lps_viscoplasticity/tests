@@ -1,0 +1,32 @@
+[Tests]
+  [./rodlet]
+    type = CSVDiff
+    input = 'rodlet.i'
+    csvdiff = 'rodlet_out.csv'
+    heavy = true
+    #issues = '#7228 #13260'
+    #design = '/ADComputeFiniteStrain.md'
+    #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a tensile test simulation in 3D using AD and match non-AD methods'
+  [../]
+  [./ad-rodlet]
+    type = CSVDiff
+    input = 'ad-rodlet.i'
+    csvdiff = 'ad-rodlet_out.csv'
+    heavy = true
+    #issues = '#7228 #13260'
+    #design = '/ADComputeFiniteStrain.md'
+    #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a tensile test simulation in 3D using AD and match non-AD methods'
+  [../]
+  [./ad-rodlet-jac]
+    type = PetscJacobianTester
+    skip = 'Jacobian not set up fully'
+    input = 'ad-rodlet.i'
+    heavy = true
+    method = 'opt'
+    valgrind = none
+    petsc_version = '>=3.9.4'
+    #issues = '#12650 #13260'
+    #design = 'jacobian_definitions.md'
+    #requirement = 'Finite strain methods in Tensor Mechanics should be able to adequately simulate a bar bending simulation in 2D using AD and calculate perfect Jacobians'
+  [../]
+[]

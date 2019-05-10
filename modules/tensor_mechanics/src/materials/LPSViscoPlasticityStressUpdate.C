@@ -48,7 +48,6 @@ LPSViscoPlasticityStressUpdate::LPSViscoPlasticityStressUpdate(const InputParame
         _base_name + getParam<std::string>("effective_inelastic_strain_name"))),
     _effective_inelastic_strain_old(getMaterialPropertyOld<Real>(
         _base_name + getParam<std::string>("effective_inelastic_strain_name"))),
-    _gauge_stress(declareProperty<Real>("gauge_stress")),
     _creep_strain(declareProperty<RankTwoTensor>(_base_name + "creep_strain")),
     _creep_strain_old(getMaterialPropertyOld<RankTwoTensor>(_base_name + "creep_strain")),
     _porosity(declareProperty<Real>("porosity")),
@@ -57,6 +56,7 @@ LPSViscoPlasticityStressUpdate::LPSViscoPlasticityStressUpdate(const InputParame
     _powers(getParam<std::vector<Real>>("powers")),
     _num_models(_powers.size()),
     _coefficients(_num_models),
+    _gauge_stresses(_num_models),
     _initial_porosity(getParam<Real>("initial_porosity")),
     _verbose(getParam<bool>("verbose")),
     _hydro_stress(0.0),
@@ -71,10 +71,12 @@ LPSViscoPlasticityStressUpdate::LPSViscoPlasticityStressUpdate(const InputParame
       getParam<std::vector<MaterialPropertyName>>("coefficients");
   if (_num_models != coeff_names.size())
     paramError(
-        "power", "In ", _name, ": Number of powers and number of coefficients must be the same!");
+        "powers", "In ", _name, ": Number of powers and number of coefficients must be the same!");
   for (unsigned int i = 0; i < _num_models; ++i)
   {
     _coefficients[i] = &adGetADMaterialProperty<Real>(coeff_names[i]);
+    _gauge_stresses[i] = &declareProperty<Real>(
+        _base_name + "gauge_stress_n" + Moose::stringify(_powers[i]) + "_i" + Moose::stringify(i));
   }
 }
 
@@ -124,7 +126,7 @@ LPSViscoPlasticityStressUpdate::updateState(RankTwoTensor & strain_increment,
     for (unsigned int i = 0; i < _num_models; ++i)
     {
       computeNStrainRate(
-          _gauge_stress[_qp], dpsi_dgauge, strain_rate, equiv_stress, dev_stress, stress, i);
+          (*_gauge_stresses[i])[_qp], dpsi_dgauge, strain_rate, equiv_stress, dev_stress, stress, i);
       sum_dpsi_dgauge += dpsi_dgauge;
     }
 

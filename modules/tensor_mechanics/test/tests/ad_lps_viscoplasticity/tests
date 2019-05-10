@@ -19,7 +19,6 @@
     type = PetscJacobianTester
     skip = 'Jacobian not set up fully'
     input = 'test.i'
-    run_sim = 'True'
     prereq = 'test'
     #ratio_tol = 5e-8
     #difference_tol = 1

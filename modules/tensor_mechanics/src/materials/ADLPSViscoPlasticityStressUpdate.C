@@ -26,8 +26,8 @@ defineADValidParams(
         "effective_inelastic_strain_name",
         "effective_creep_strain",
         "Name of the material property that stores the effective inelastic strain");
-    params.addRequiredParam<std::vector<MaterialPropertyName>>("coefficients",
-                                               "Leading coefficient in power-law equation");
+    params.addRequiredParam<std::vector<MaterialPropertyName>>(
+        "coefficients", "Leading coefficient in power-law equation");
     params.addRequiredParam<std::vector<Real>>(
         "powers", "Exponent on effective stress in power-law equation");
     params.addParam<bool>("verbose", false, "Flag to output verbose information");
@@ -45,7 +45,6 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::ADLPSViscoPlasticityStressUpdat
         _base_name + adGetParam<std::string>("effective_inelastic_strain_name"))),
     _effective_inelastic_strain_old(adGetMaterialPropertyOld<Real>(
         _base_name + adGetParam<std::string>("effective_inelastic_strain_name"))),
-    _gauge_stress(adDeclareADProperty<Real>("gauge_stress")),
     _creep_strain(adDeclareADProperty<RankTwoTensor>(_base_name + "creep_strain")),
     _creep_strain_old(adGetMaterialPropertyOld<RankTwoTensor>(_base_name + "creep_strain")),
     _porosity(adDeclareADProperty<Real>("porosity")),
@@ -54,6 +53,7 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::ADLPSViscoPlasticityStressUpdat
     _powers(adGetParam<std::vector<Real>>("powers")),
     _num_models(_powers.size()),
     _coefficients(_num_models),
+    _gauge_stresses(_num_models),
     _initial_porosity(adGetParam<Real>("initial_porosity")),
     _verbose(adGetParam<bool>("verbose")),
     _hydro_stress(0.0),
@@ -64,15 +64,17 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::ADLPSViscoPlasticityStressUpdat
     _current_activation_energy(0.0),
     _current_coefficient(0.0)
 {
-  std::vector<MaterialPropertyName> coeff_names = adGetParam<std::vector<MaterialPropertyName> >("coefficients");
+  std::vector<MaterialPropertyName> coeff_names =
+      adGetParam<std::vector<MaterialPropertyName>>("coefficients");
   if (_num_models != coeff_names.size())
-    paramError("power",
-               "In ",
-               _name,
-               ": Number of powers and number of coefficients must be the same!");
+    paramError(
+        "powers", "In ", _name, ": Number of powers and number of coefficients must be the same!");
+
   for (unsigned int i = 0; i < _num_models; ++i)
   {
     _coefficients[i] = &adGetADMaterialProperty<Real>(coeff_names[i]);
+    _gauge_stresses[i] =
+        &adDeclareADProperty<Real>(_base_name + "gauge_stress_n" + Moose::stringify(_powers[i]) + "_i" + Moose::stringify(i));
   }
 }
 
@@ -124,7 +126,7 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::updateState(
     for (unsigned int i = 0; i < _num_models; ++i)
     {
       computeNStrainRate(
-          _gauge_stress[_qp], dpsi_dgauge, strain_rate, equiv_stress, dev_stress, stress, i);
+          (*_gauge_stresses[i])[_qp], dpsi_dgauge, strain_rate, equiv_stress, dev_stress, stress, i);
       sum_dpsi_dgauge += dpsi_dgauge;
     }
 
