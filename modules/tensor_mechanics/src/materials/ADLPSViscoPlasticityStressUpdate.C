@@ -73,8 +73,8 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::ADLPSViscoPlasticityStressUpdat
   for (unsigned int i = 0; i < _num_models; ++i)
   {
     _coefficients[i] = &adGetADMaterialProperty<Real>(coeff_names[i]);
-    _gauge_stresses[i] =
-        &adDeclareADProperty<Real>(_base_name + "gauge_stress_n" + Moose::stringify(_powers[i]) + "_i" + Moose::stringify(i));
+    _gauge_stresses[i] = &adDeclareADProperty<Real>(
+        _base_name + "gauge_stress_n" + Moose::stringify(_powers[i]) + "_i" + Moose::stringify(i));
   }
 }
 
@@ -109,24 +109,30 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::updateState(
 {
   inelastic_strain_increment.zero();
 
-  ADRankTwoTensor dev_stress = stress.deviatoric();
-  ADReal dev_trial_stress_squared = dev_stress.doubleContraction(dev_stress);
-  ADReal equiv_stress = MooseUtils::absoluteFuzzyEqual(dev_trial_stress_squared, 0.0)
-                            ? 0.0
-                            : std::sqrt(3.0 / 2.0 * dev_trial_stress_squared);
+  _hydro_stress = stress.trace() / 3.0;
+  const ADRankTwoTensor dev_stress = stress.deviatoric();
+  const ADReal dev_trial_stress_squared = dev_stress.doubleContraction(dev_stress);
+  const ADReal equiv_stress = MooseUtils::absoluteFuzzyEqual(dev_trial_stress_squared, 0.0)
+                                  ? 0.0
+                                  : std::sqrt(3.0 / 2.0 * dev_trial_stress_squared);
+
+  computeStressInitialize(equiv_stress, elasticity_tensor);
 
   if (equiv_stress)
   {
-    _hydro_stress = stress.trace() / 3.0;
-
     ADRankTwoTensor strain_rate;
     strain_rate.zero();
     ADReal dpsi_dgauge(0);
     ADReal sum_dpsi_dgauge(0);
     for (unsigned int i = 0; i < _num_models; ++i)
     {
-      computeNStrainRate(
-          (*_gauge_stresses[i])[_qp], dpsi_dgauge, strain_rate, equiv_stress, dev_stress, stress, i);
+      computeNStrainRate((*_gauge_stresses[i])[_qp],
+                         dpsi_dgauge,
+                         strain_rate,
+                         equiv_stress,
+                         dev_stress,
+                         stress,
+                         i);
       sum_dpsi_dgauge += dpsi_dgauge;
     }
 
@@ -137,8 +143,15 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::updateState(
 
   stress = elasticity_tensor * (elastic_strain_old + strain_increment);
 
-  _porosity[_qp] =
-      (1.0 - _porosity_old[_qp]) * inelastic_strain_increment.tr() + _porosity_old[_qp];
+  computeStressFinalize(inelastic_strain_increment);
+}
+
+template <ComputeStage compute_stage>
+void
+ADLPSViscoPlasticityStressUpdate<compute_stage>::computeStressFinalize(
+    const ADRankTwoTensor & plastic_strain_increment)
+{
+  _porosity[_qp] = (1.0 - _porosity_old[_qp]) * plastic_strain_increment.tr() + _porosity_old[_qp];
 
   if (_verbose)
     Moose::out << "new porosity: " << MetaPhysicL::raw_value(_porosity[_qp])
@@ -152,7 +165,7 @@ ADLPSViscoPlasticityStressUpdate<compute_stage>::updateState(
     throw MooseException(exception_meessage.str());
   }
 
-  _creep_strain[_qp] = _creep_strain_old[_qp] + strain_increment;
+  _creep_strain[_qp] = _creep_strain_old[_qp] + plastic_strain_increment;
 }
 
 template <ComputeStage compute_stage>
@@ -183,11 +196,12 @@ template <ComputeStage compute_stage>
 Real
 ADLPSViscoPlasticityStressUpdate<compute_stage>::computeTimeStepLimit()
 {
-  // Real scalar_inelastic_strain_incr = MetaPhysicL::raw_value(_porosity[_qp]) -
-  // _porosity_old[_qp];
-  const Real scalar_inelastic_strain_incr =
-      MetaPhysicL::raw_value(_effective_inelastic_strain[_qp]) -
-      _effective_inelastic_strain_old[_qp];
+  const Real strain_inc = MetaPhysicL::raw_value(_effective_inelastic_strain[_qp]) -
+                          _effective_inelastic_strain_old[_qp];
+  const Real porosity_inc = MetaPhysicL::raw_value(_porosity[_qp]) - _porosity_old[_qp];
+
+  const Real scalar_inelastic_strain_incr = strain_inc + porosity_inc;
+
   if (MooseUtils::absoluteFuzzyEqual(scalar_inelastic_strain_incr, 0.0))
     return std::numeric_limits<Real>::max();
 

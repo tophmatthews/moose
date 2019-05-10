@@ -93,6 +93,16 @@ protected:
   void propagateQpStatefulPropertiesRadialReturn();
 
   /**
+   * Perform any necessary initialization before return mapping iterations
+   * @param effective_trial_stress Effective trial stress
+   * @param elasticityTensor     Elasticity tensor
+   */
+  virtual void computeStressInitialize(const ADReal & /*effective_trial_stress*/,
+                                       const ADRankFourTensor & /*elasticity_tensor*/)
+  {
+  }
+
+  /**
    * Calculate the derivative of the strain increment with respect to the updated stress.
    * @param effective_trial_stress Effective trial stress
    * @param scalar                 Inelastic strain increment magnitude being solved for
@@ -114,6 +124,12 @@ protected:
   {
     return effective_trial_stress;
   }
+
+  /**
+   * Perform any necessary steps to finalize state after return mapping iterations
+   * @param inelasticStrainIncrement Inelastic strain increment
+   */
+  virtual void computeStressFinalize(const ADRankTwoTensor & plastic_strain_increment);
 
   virtual ADReal computeResidual(const ADReal & effective_trial_stress,
                                  const ADReal & scalar) override;

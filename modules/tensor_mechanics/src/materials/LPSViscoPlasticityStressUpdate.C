@@ -109,24 +109,30 @@ LPSViscoPlasticityStressUpdate::updateState(RankTwoTensor & strain_increment,
 {
   inelastic_strain_increment.zero();
 
-  RankTwoTensor dev_stress = stress.deviatoric();
-  Real dev_trial_stress_squared = dev_stress.doubleContraction(dev_stress);
-  Real equiv_stress = MooseUtils::absoluteFuzzyEqual(dev_trial_stress_squared, 0.0)
-                          ? 0.0
-                          : std::sqrt(3.0 / 2.0 * dev_trial_stress_squared);
+  _hydro_stress = stress.trace() / 3.0;
+  const RankTwoTensor dev_stress = stress.deviatoric();
+  const Real dev_trial_stress_squared = dev_stress.doubleContraction(dev_stress);
+  const Real equiv_stress = MooseUtils::absoluteFuzzyEqual(dev_trial_stress_squared, 0.0)
+                                ? 0.0
+                                : std::sqrt(3.0 / 2.0 * dev_trial_stress_squared);
+
+  computeStressInitialize(equiv_stress, elasticity_tensor);
 
   if (equiv_stress)
   {
-    _hydro_stress = stress.trace() / 3.0;
-
     RankTwoTensor strain_rate;
     strain_rate.zero();
     Real dpsi_dgauge(0);
     Real sum_dpsi_dgauge(0);
     for (unsigned int i = 0; i < _num_models; ++i)
     {
-      computeNStrainRate(
-          (*_gauge_stresses[i])[_qp], dpsi_dgauge, strain_rate, equiv_stress, dev_stress, stress, i);
+      computeNStrainRate((*_gauge_stresses[i])[_qp],
+                         dpsi_dgauge,
+                         strain_rate,
+                         equiv_stress,
+                         dev_stress,
+                         stress,
+                         i);
       sum_dpsi_dgauge += dpsi_dgauge;
     }
 
@@ -137,11 +143,17 @@ LPSViscoPlasticityStressUpdate::updateState(RankTwoTensor & strain_increment,
 
   stress = elasticity_tensor * (elastic_strain_old + strain_increment);
 
-  _porosity[_qp] =
-      (1.0 - _porosity_old[_qp]) * inelastic_strain_increment.tr() + _porosity_old[_qp];
+  computeStressFinalize(inelastic_strain_increment);
+}
+
+void
+LPSViscoPlasticityStressUpdate::computeStressFinalize(
+    const RankTwoTensor & plastic_strain_increment)
+{
+  _porosity[_qp] = (1.0 - _porosity_old[_qp]) * plastic_strain_increment.tr() + _porosity_old[_qp];
 
   if (_verbose)
-    Moose::out << "new porosity: " << (_porosity[_qp]) << " old porosity: " << _porosity_old[_qp]
+    Moose::out << "  new porosity: " << (_porosity[_qp]) << " old porosity: " << _porosity_old[_qp]
                << std::endl;
 
   if (_porosity[_qp] < 0.0 || _porosity[_qp] > 1.0)
@@ -152,35 +164,35 @@ LPSViscoPlasticityStressUpdate::updateState(RankTwoTensor & strain_increment,
     throw MooseException(exception_meessage.str());
   }
 
-  _creep_strain[_qp] = _creep_strain_old[_qp] + strain_increment;
+  _creep_strain[_qp] = _creep_strain_old[_qp] + plastic_strain_increment;
 }
 
 Real
 LPSViscoPlasticityStressUpdate::computeReferenceResidual(
     const Real /*effective_trial_stress*/, const Real scalar_effective_inelastic_strain)
 {
-  return (scalar_effective_inelastic_strain);
+  return scalar_effective_inelastic_strain;
 }
 
 Real
 LPSViscoPlasticityStressUpdate::maximumPermissibleValue(const Real effective_trial_stress) const
 {
-  return (effective_trial_stress)*1.0e6;
+  return effective_trial_stress * 1.0e6;
 }
 
 Real
 LPSViscoPlasticityStressUpdate::minimumPermissibleValue(const Real effective_trial_stress) const
 {
-  return (effective_trial_stress) / 1.0e6;
+  return effective_trial_stress / 1.0e6;
 }
 
 Real
 LPSViscoPlasticityStressUpdate::computeTimeStepLimit()
 {
-  // Real scalar_inelastic_strain_incr = (_porosity[_qp]) -
-  // _porosity_old[_qp];
-  const Real scalar_inelastic_strain_incr =
-      (_effective_inelastic_strain[_qp]) - _effective_inelastic_strain_old[_qp];
+  const Real strain_inc = _effective_inelastic_strain[_qp] - _effective_inelastic_strain_old[_qp];
+  const Real porosity_inc = _porosity[_qp] - _porosity_old[_qp];
+
+  const Real scalar_inelastic_strain_incr = strain_inc + porosity_inc;
   if (MooseUtils::absoluteFuzzyEqual(scalar_inelastic_strain_incr, 0.0))
     return std::numeric_limits<Real>::max();
 
