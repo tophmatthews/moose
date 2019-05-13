@@ -144,4 +144,3 @@ protected:
    */
   const RankFourTensor _deviatoric_projection_four;
 };
-

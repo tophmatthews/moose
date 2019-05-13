@@ -1,12 +1,6 @@
 [Mesh]
   type = GeneratedMesh
   dim = 2
-  nx = 4
-  ny = 4
-  nz = 4
-  xmax = 0.002
-  ymax = 0.002
-  zmax = 0.002
   second_order = true
 []
 
@@ -25,7 +19,7 @@
   [./pull]
     type = PiecewiseLinear
     x = '0 1'
-    y = '0 -1e-4'
+    y = '0 -1e-1'
   [../]
 []
 
@@ -140,6 +134,7 @@
   [../]
   [./dt]
     type = TimestepSize
+    outputs = console
   [../]
   [./num_lin]
     type = NumLinearIterations

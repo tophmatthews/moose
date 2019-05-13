@@ -9,10 +9,7 @@
 
 #include "LPSViscoPlasticityStressUpdate.h"
 
-#include "MooseMesh.h"
-#include "ElasticityTensorTools.h"
 #include "libmesh/utility.h"
-#include "RankTwoScalarTools.h"
 
 registerMooseObject("TensorMechanicsApp", LPSViscoPlasticityStressUpdate);
 
@@ -22,6 +19,7 @@ validParams<LPSViscoPlasticityStressUpdate>()
 {
   InputParameters params = validParams<StressUpdateBase>();
   params += validParams<SingleVariableReturnMappingSolution>();
+  params.addClassDescription("");
   params.addParam<Real>("max_inelastic_increment",
                         1.0e-4,
                         "The maximum inelastic strain increment allowed in a time step");
@@ -63,18 +61,17 @@ LPSViscoPlasticityStressUpdate::LPSViscoPlasticityStressUpdate(const InputParame
     _identity_two(RankTwoTensor::initIdentity),
     _dhydro_stress_dsigma(_identity_two / 3.0),
     _derivative(0.0),
-    _current_n(0.0),
-    _current_activation_energy(0.0),
-    _current_coefficient(0.0)
+    _current_n(0.0)
 {
   std::vector<MaterialPropertyName> coeff_names =
       getParam<std::vector<MaterialPropertyName>>("coefficients");
   if (_num_models != coeff_names.size())
     paramError(
         "powers", "In ", _name, ": Number of powers and number of coefficients must be the same!");
+
   for (unsigned int i = 0; i < _num_models; ++i)
   {
-    _coefficients[i] = &adGetADMaterialProperty<Real>(coeff_names[i]);
+    _coefficients[i] = &getMaterialProperty<Real>(coeff_names[i]);
     _gauge_stresses[i] = &declareProperty<Real>(
         _base_name + "gauge_stress_n" + Moose::stringify(_powers[i]) + "_i" + Moose::stringify(i));
   }
@@ -89,7 +86,7 @@ LPSViscoPlasticityStressUpdate::initQpStatefulProperties()
 }
 
 void
-LPSViscoPlasticityStressUpdate::propagateQpStatefulPropertiesRadialReturn()
+LPSViscoPlasticityStressUpdate::propagateQpStatefulProperties()
 {
   _effective_inelastic_strain[_qp] = _effective_inelastic_strain_old[_qp];
   _porosity[_qp] = _porosity_old[_qp];
@@ -107,54 +104,67 @@ LPSViscoPlasticityStressUpdate::updateState(RankTwoTensor & strain_increment,
                                             bool /*compute_full_tangent_operator*/,
                                             RankFourTensor & /*tangent_operator*/)
 {
+  // Compute initial hydrostatic stress and porosity
+  _hydro_stress = stress.trace() / 3.0;
+  _porosity[_qp] = _porosity_old[_qp];
+  _effective_inelastic_strain[_qp] = _effective_inelastic_strain_old[_qp];
   inelastic_strain_increment.zero();
 
-  _hydro_stress = stress.trace() / 3.0;
+  // Compute swelling increment due to gas diffusion
+  const Real scalar_swelling_increment = computeSwellingIncrement(_hydro_stress);
+
+  // Compute new intermediate stress and scalar stresses
+  if (scalar_swelling_increment)
+  {
+    inelastic_strain_increment += scalar_swelling_increment * _identity_two;
+    strain_increment -= scalar_swelling_increment * _identity_two;
+    stress = elasticity_tensor * (elastic_strain_old + strain_increment);
+    _hydro_stress = stress.trace() / 3.0;
+    _effective_inelastic_strain[_qp] += scalar_swelling_increment;
+    _porosity[_qp] = (1.0 - _porosity_old[_qp]) * scalar_swelling_increment + _porosity_old[_qp];
+  }
+
+  // Compute intermediate equivalent stress
   const RankTwoTensor dev_stress = stress.deviatoric();
-  const Real dev_trial_stress_squared = dev_stress.doubleContraction(dev_stress);
-  const Real equiv_stress = MooseUtils::absoluteFuzzyEqual(dev_trial_stress_squared, 0.0)
-                                ? 0.0
-                                : std::sqrt(3.0 / 2.0 * dev_trial_stress_squared);
+  const Real dev_stress_squared = dev_stress.doubleContraction(dev_stress);
+  const Real equiv_stress = MooseUtils::absoluteFuzzyEqual(dev_stress_squared, 0.0)
+                                  ? 0.0
+                                  : std::sqrt(3.0 / 2.0 * dev_stress_squared);
 
   computeStressInitialize(equiv_stress, elasticity_tensor);
 
-  if (equiv_stress)
+  if (equiv_stress || _hydro_stress)
   {
-    RankTwoTensor strain_rate;
-    strain_rate.zero();
-    Real dpsi_dgauge(0);
+    // Initialize sum of all derivatives of residual with respect to each gauge stress
     Real sum_dpsi_dgauge(0);
+
+    RankTwoTensor creep_strain_increment;
     for (unsigned int i = 0; i < _num_models; ++i)
     {
-      computeNStrainRate((*_gauge_stresses[i])[_qp],
-                         dpsi_dgauge,
-                         strain_rate,
-                         equiv_stress,
-                         dev_stress,
-                         stress,
-                         i);
+      Real dpsi_dgauge(0); // Initalize derivative of residual with respect to the gauge stress
+      computeCreepStrainIncrementN((*_gauge_stresses[i])[_qp],
+                                   dpsi_dgauge,
+                                   creep_strain_increment,
+                                   equiv_stress,
+                                   dev_stress,
+                                   stress,
+                                   i);
       sum_dpsi_dgauge += dpsi_dgauge;
     }
 
-    inelastic_strain_increment = strain_rate * _dt;
-    strain_increment -= inelastic_strain_increment;
-    _effective_inelastic_strain[_qp] = _effective_inelastic_strain_old[_qp] + sum_dpsi_dgauge * _dt;
+    inelastic_strain_increment += creep_strain_increment;
+    strain_increment -= creep_strain_increment;
+    _effective_inelastic_strain[_qp] += sum_dpsi_dgauge * _dt;
+    stress = elasticity_tensor * (elastic_strain_old + strain_increment);
+    _creep_strain[_qp] = _creep_strain_old[_qp] + inelastic_strain_increment;
+
+    _porosity[_qp] =
+        (1.0 - _porosity_old[_qp]) * inelastic_strain_increment.tr() + _porosity_old[_qp];
   }
 
-  stress = elasticity_tensor * (elastic_strain_old + strain_increment);
-
-  computeStressFinalize(inelastic_strain_increment);
-}
-
-void
-LPSViscoPlasticityStressUpdate::computeStressFinalize(
-    const RankTwoTensor & plastic_strain_increment)
-{
-  _porosity[_qp] = (1.0 - _porosity_old[_qp]) * plastic_strain_increment.tr() + _porosity_old[_qp];
-
   if (_verbose)
-    Moose::out << "  new porosity: " << (_porosity[_qp]) << " old porosity: " << _porosity_old[_qp]
-               << std::endl;
+    Moose::out << "current porosity: " << MetaPhysicL::raw_value(_porosity[_qp])
+               << " old porosity: " << _porosity_old[_qp] << std::endl;
 
   if (_porosity[_qp] < 0.0 || _porosity[_qp] > 1.0)
   {
@@ -164,7 +174,7 @@ LPSViscoPlasticityStressUpdate::computeStressFinalize(
     throw MooseException(exception_meessage.str());
   }
 
-  _creep_strain[_qp] = _creep_strain_old[_qp] + plastic_strain_increment;
+  computeStressFinalize(inelastic_strain_increment);
 }
 
 Real
@@ -189,10 +199,9 @@ LPSViscoPlasticityStressUpdate::minimumPermissibleValue(const Real effective_tri
 Real
 LPSViscoPlasticityStressUpdate::computeTimeStepLimit()
 {
-  const Real strain_inc = _effective_inelastic_strain[_qp] - _effective_inelastic_strain_old[_qp];
-  const Real porosity_inc = _porosity[_qp] - _porosity_old[_qp];
+  const Real scalar_inelastic_strain_incr =
+      _effective_inelastic_strain[_qp] - _effective_inelastic_strain_old[_qp];
 
-  const Real scalar_inelastic_strain_incr = strain_inc + porosity_inc;
   if (MooseUtils::absoluteFuzzyEqual(scalar_inelastic_strain_incr, 0.0))
     return std::numeric_limits<Real>::max();
 
@@ -217,13 +226,12 @@ LPSViscoPlasticityStressUpdate::computeResidual(const Real equiv_stress, const R
   const Real M = computeM(_hydro_stress, trial_gauge);
   const Real h = computeH(_current_n, M);
   const Real n_mp = (_current_n - 1.0) / (_current_n + 1.0);
-  const Real res = Utility::pow<2>(equiv_stress / trial_gauge) +
-                   2.0 * _porosity_old[_qp] * (h + n_mp / h) - 1.0 -
-                   n_mp * Utility::pow<2>(_porosity_old[_qp]);
+  const Real res = Utility::pow<2>(equiv_stress / trial_gauge) + _porosity[_qp] * (h + n_mp / h) -
+                     1.0 - n_mp * Utility::pow<2>(_porosity[_qp]);
 
-  const Real dM_dgauge_stress = computeM(_hydro_stress, trial_gauge, 2);
+  const Real dM_dgauge_stress = -M / trial_gauge;
   const Real dh_dM = computeH(_current_n, M, true);
-  const Real dres_dh = 2.0 * _porosity_old[_qp] * (1.0 - n_mp / Utility::pow<2>(h));
+  const Real dres_dh = _porosity[_qp] * (1.0 - n_mp / Utility::pow<2>(h));
   const Real dres_dgauge_stress_left =
       -2.0 * Utility::pow<2>(trial_gauge) / Utility::pow<3>(trial_gauge);
   _derivative = dres_dgauge_stress_left + dres_dh * dh_dM * dM_dgauge_stress;
@@ -231,20 +239,16 @@ LPSViscoPlasticityStressUpdate::computeResidual(const Real equiv_stress, const R
   if (_verbose)
   {
     Moose::out << "in computeResidual:\n"
-               << "  pos: " << _q_point[_qp] << " hydro: " << (_hydro_stress)
-               << " equiv: " << (equiv_stress) << " gauge: " << (trial_gauge) << " M: " << (M)
-               << " h: " << (h) << std::endl;
-    Moose::out << "  res: " << (res) << "  deriv: " << (_derivative) << std::endl;
+               << "  pos: " << _q_point[_qp] << " hydro: " << MetaPhysicL::raw_value(_hydro_stress)
+               << " equiv: " << MetaPhysicL::raw_value(equiv_stress)
+               << " gauge: " << MetaPhysicL::raw_value(trial_gauge)
+               << " M: " << MetaPhysicL::raw_value(M) << " h: " << MetaPhysicL::raw_value(h)
+               << std::endl;
+    Moose::out << "  res: " << MetaPhysicL::raw_value(res)
+               << "  deriv: " << MetaPhysicL::raw_value(_derivative) << std::endl;
   }
 
   return res;
-}
-
-Real
-LPSViscoPlasticityStressUpdate::computeDerivative(const Real /*equiv_stress*/,
-                                                  const Real /*trial_gauge*/)
-{
-  return _derivative;
 }
 
 Real
@@ -257,18 +261,9 @@ LPSViscoPlasticityStressUpdate::computeH(const Real n, const Real & M, const boo
 }
 
 Real
-LPSViscoPlasticityStressUpdate::computeM(const Real & hydro_stress,
-                                         const Real & gauge_stress,
-                                         const unsigned int derivative)
+LPSViscoPlasticityStressUpdate::computeM(const Real & hydro_stress, const Real & gauge_stress)
 {
-  if (derivative == 0)
-    return 3.0 / 2.0 * std::abs(hydro_stress) / gauge_stress;
-  else if (derivative == 1)
-    return 3.0 / 2.0 * std::abs(hydro_stress) / gauge_stress / hydro_stress;
-  else if (derivative == 2)
-    return -3.0 / 2.0 * std::abs(hydro_stress) / gauge_stress / gauge_stress;
-  else
-    mooseError("In ", _name, ": Internal error in LPSViscoPlasticityStressUpdate::computeM");
+  return 3.0 / 2.0 * std::abs(hydro_stress) / gauge_stress;
 }
 
 RankTwoTensor
@@ -281,13 +276,22 @@ LPSViscoPlasticityStressUpdate::computeDGaugeDSigma(const Real & gauge_stress,
   const Real M = computeM(_hydro_stress, gauge_stress);
   const Real h = computeH(n, M);
 
-  const Real dres_dh = _porosity_old[_qp] * (1.0 - (n - 1.0) / (n + 1.0) / Utility::pow<2>(h));
-  const Real dh_dM = computeH(n, M, true);
-  const Real dM_dhydro_stress = computeM(_hydro_stress, gauge_stress, 1);
-  const Real dres_dhydro_stress = dres_dh * dh_dM * dM_dhydro_stress;
+  Real dres_dhydro_stress = 0.0;
+  if (_hydro_stress)
+  {
+    const Real dres_dh = _porosity[_qp] * (1.0 - (n - 1.0) / (n + 1.0) / Utility::pow<2>(h));
+    const Real dh_dM = computeH(n, M, true);
+    const Real dM_dhydro_stress = M / _hydro_stress;
+    dres_dhydro_stress = dres_dh * dh_dM * dM_dhydro_stress;
+  }
 
-  const Real dres_dequiv_stress = 2.0 * equiv_stress / Utility::pow<2>(gauge_stress);
-  const RankTwoTensor dequiv_stress_dsigma = 3.0 / 2.0 * dev_stress / equiv_stress;
+  Real dres_dequiv_stress = 0.0;
+  RankTwoTensor dequiv_stress_dsigma;
+  if (equiv_stress)
+  {
+    dres_dequiv_stress = 2.0 * equiv_stress / Utility::pow<2>(gauge_stress);
+    dequiv_stress_dsigma = 3.0 / 2.0 * dev_stress / equiv_stress;
+  }
 
   const RankTwoTensor dres_dsigma =
       dres_dhydro_stress * _dhydro_stress_dsigma + dres_dequiv_stress * dequiv_stress_dsigma;
@@ -298,19 +302,29 @@ LPSViscoPlasticityStressUpdate::computeDGaugeDSigma(const Real & gauge_stress,
 }
 
 void
-LPSViscoPlasticityStressUpdate::computeNStrainRate(Real & gauge_stress,
-                                                   Real & dpsi_dgauge,
-                                                   RankTwoTensor & strain_rate,
-                                                   const Real & equiv_stress,
-                                                   const RankTwoTensor & dev_stress,
-                                                   const RankTwoTensor & stress,
-                                                   const unsigned int i)
+LPSViscoPlasticityStressUpdate::computeCreepStrainIncrementN(
+    Real & gauge_stress,
+    Real & dpsi_dgauge,
+    RankTwoTensor & creep_strain_increment,
+    const Real & equiv_stress,
+    const RankTwoTensor & dev_stress,
+    const RankTwoTensor & stress,
+    const unsigned int i)
 {
   // Set model parameters for evaluations
   _current_n = _powers[i];
 
   // Run non-linear solve for gauge stress
-  returnMappingSolve(equiv_stress, gauge_stress, _console);
+  if (_hydro_stress && _porosity[_qp])
+    returnMappingSolve(equiv_stress, gauge_stress, _console);
+  else if (equiv_stress)
+    gauge_stress =
+        equiv_stress / std::sqrt(1.0 + (_current_n - 1.0) / (_current_n + 1.0) * _porosity[_qp]);
+  else
+    mooseError(
+        "In ",
+        _name,
+        ": No equivalent and hydro stress is zero. Something is wrong in computeCreepStrainIncrementN");
 
   if (gauge_stress < 0.0)
     mooseError("In ",
@@ -319,6 +333,18 @@ LPSViscoPlasticityStressUpdate::computeNStrainRate(Real & gauge_stress,
 
   dpsi_dgauge = (*_coefficients[i])[_qp] * std::pow(gauge_stress, _current_n);
 
-  strain_rate +=
-      dpsi_dgauge * computeDGaugeDSigma(gauge_stress, equiv_stress, dev_stress, stress, _current_n);
+  creep_strain_increment +=
+      _dt * dpsi_dgauge *
+      computeDGaugeDSigma(gauge_stress, equiv_stress, dev_stress, stress, _current_n);
+}
+
+Real
+LPSViscoPlasticityStressUpdate::initialGuess(const Real effective_trial_stress)
+{
+  if (effective_trial_stress)
+    return effective_trial_stress;
+  else if (_hydro_stress)
+    return std::abs(_hydro_stress);
+  else
+    mooseError("negative initial guess");
 }

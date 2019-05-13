@@ -91,7 +91,8 @@
   [./coef]
     type = ParsedMaterial
     f_name = coef
-    function = '8e-20 * exp(-28500 / 1.987 / 1200)'
+    args = temp
+    function = '8e-20 * exp(-28500 / 1.987 / temp)'
   [../]
 []
 
@@ -240,6 +241,7 @@
 
 [Outputs]
   perf_graph = true
+  exodus = true
   [./out]
     type = CSV
     sync_only = true
