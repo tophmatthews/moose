@@ -1,8 +1,0 @@
-[Tests]
-  deprecated = True
-  [./test]
-    type = 'Exodiff'
-    input = 'assign_subdomain_id.i'
-    exodiff = 'assign_subdomain_id_out.e'
-  [../]
-[]

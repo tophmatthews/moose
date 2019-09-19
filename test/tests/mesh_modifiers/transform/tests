@@ -1,8 +1,0 @@
-[Tests]
-  deprecated = True
-  [./test]
-    type = 'Exodiff'
-    input = 'rotate_and_scale.i'
-    exodiff = 'rotate_and_scale_out.e'
-  [../]
-[]
