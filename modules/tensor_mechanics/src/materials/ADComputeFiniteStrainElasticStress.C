@@ -31,7 +31,7 @@ ADComputeFiniteStrainElasticStress::ADComputeFiniteStrainElasticStress(
     _elasticity_tensor_name(_base_name + "elasticity_tensor"),
     _elasticity_tensor(
         _use_old_elasticity_tensor
-            ? getGenericZeroMaterialProperty<RankFourTensor, true>("zero")
+            ? getGenericZeroMaterialProperty<RankFourTensor, true>(_elasticity_tensor_name)
             : getGenericMaterialProperty<RankFourTensor, true>(_elasticity_tensor_name)),
     _elasticity_tensor_old(_use_old_elasticity_tensor
                                ? getMaterialPropertyOld<RankFourTensor>(_elasticity_tensor_name)
