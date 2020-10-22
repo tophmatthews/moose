@@ -28,6 +28,10 @@ ADRadialReturnStressUpdate::validParams()
       "effective_inelastic_strain_name",
       "Name of the material property that stores the effective inelastic strain");
   params.addParam<bool>("apply_strain", true, "Flag to apply strain. Used for testing.");
+  params.addParam<bool>(
+      "use_old_elasticity_tensor",
+      false,
+      "Flag to optionally use the elasticity tensor computed at the previous timestep.");
   params.addParamNamesToGroup("effective_inelastic_strain_name apply_strain", "Advanced");
   return params;
 }
@@ -40,7 +44,8 @@ ADRadialReturnStressUpdate::ADRadialReturnStressUpdate(const InputParameters & p
     _effective_inelastic_strain_old(getMaterialPropertyOld<Real>(
         _base_name + getParam<std::string>("effective_inelastic_strain_name"))),
     _max_inelastic_increment(getParam<Real>("max_inelastic_increment")),
-    _apply_strain(getParam<bool>("apply_strain"))
+    _apply_strain(getParam<bool>("apply_strain")),
+    _use_old_elasticity_tensor(getParam<bool>("use_old_elasticity_tensor"))
 {
 }
 
@@ -76,9 +81,16 @@ ADRadialReturnStressUpdate::updateState(ADRankTwoTensor & strain_increment,
       dev_trial_stress_squared == 0.0 ? 0.0 : std::sqrt(3.0 / 2.0 * dev_trial_stress_squared);
 
   // Set the value of 3 * shear modulus for use as a reference residual value
-  _three_shear_modulus = 3.0 * ElasticityTensorTools::getIsotropicShearModulus(elasticity_tensor);
+  if (_use_old_elasticity_tensor)
+    _three_shear_modulus = 3.0 * ElasticityTensorTools::getIsotropicShearModulus(
+                                     MetaPhysicL::raw_value(elasticity_tensor));
+  else
+    _three_shear_modulus = 3.0 * ElasticityTensorTools::getIsotropicShearModulus(elasticity_tensor);
 
-  computeStressInitialize(effective_trial_stress, elasticity_tensor);
+  if (_use_old_elasticity_tensor)
+    computeStressInitialize(effective_trial_stress, MetaPhysicL::raw_value(elasticity_tensor));
+  else
+    computeStressInitialize(effective_trial_stress, elasticity_tensor);
 
   // Use Newton iteration to determine the scalar effective inelastic strain increment
   ADReal scalar_effective_inelastic_strain = 0.0;
@@ -104,7 +116,11 @@ ADRadialReturnStressUpdate::updateState(ADRankTwoTensor & strain_increment,
     // Use the old elastic strain here because we require tensors used by this class
     // to be isotropic and this method natively allows for changing in time
     // elasticity tensors
-    stress_new = elasticity_tensor * (elastic_strain_old + strain_increment);
+    if (_use_old_elasticity_tensor)
+      stress_new =
+          MetaPhysicL::raw_value(elasticity_tensor) * (elastic_strain_old + strain_increment);
+    else
+      stress_new = elasticity_tensor * (elastic_strain_old + strain_increment);
   }
 
   computeStressFinalize(inelastic_strain_increment);

@@ -111,4 +111,5 @@ protected:
   const MaterialProperty<Real> & _effective_inelastic_strain_old;
   Real _max_inelastic_increment;
   const bool _apply_strain;
+  const bool _use_old_elasticity_tensor;
 };
