@@ -57,5 +57,18 @@ PorosityFromStrainTempl<is_ad>::computeQpProperties()
       _porosity_old[_qp];
 
   if (_porosity[_qp] < 0.0)
-    _porosity[_qp] = 0.0;
+    _porosity[_qp] = 1.0e-10;
+  else if (std::isnan(_porosity[_qp]) || _porosity[_qp] > 1.0)
+  {
+    std::cout << _current_execute_flag << std::endl;
+    std::cout << MetaPhysicL::raw_value(_inelastic_strain[_qp]) << std::endl;
+    if (_current_execute_flag == EXEC_LINEAR || _current_execute_flag == EXEC_NONLINEAR)
+      mooseException("In ",
+                     _name,
+                     ": porosity is nan or greater than 1 (",
+                     MetaPhysicL::raw_value(_porosity[_qp]),
+                     ").");
+    else
+      _porosity[_qp] = _porosity_old[_qp];
+  }
 }

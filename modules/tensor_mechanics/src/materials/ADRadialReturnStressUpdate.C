@@ -38,7 +38,7 @@ ADRadialReturnStressUpdate::validParams()
 
 ADRadialReturnStressUpdate::ADRadialReturnStressUpdate(const InputParameters & parameters)
   : ADStressUpdateBase(parameters),
-    ADSingleVariableReturnMappingSolution(parameters),
+    ADSingleVariableReturnMappingSolution(parameters, &_fe_problem),
     _effective_inelastic_strain(declareADProperty<Real>(
         _base_name + getParam<std::string>("effective_inelastic_strain_name"))),
     _effective_inelastic_strain_old(getMaterialPropertyOld<Real>(
@@ -143,8 +143,9 @@ ADRadialReturnStressUpdate::maximumPermissibleValue(const ADReal & effective_tri
 Real
 ADRadialReturnStressUpdate::computeTimeStepLimit()
 {
-  Real scalar_inelastic_strain_incr = MetaPhysicL::raw_value(_effective_inelastic_strain[_qp]) -
-                                      _effective_inelastic_strain_old[_qp];
+  Real scalar_inelastic_strain_incr =
+      std::abs(MetaPhysicL::raw_value(_effective_inelastic_strain[_qp]) -
+               _effective_inelastic_strain_old[_qp]);
   if (MooseUtils::absoluteFuzzyEqual(scalar_inelastic_strain_incr, 0.0))
     return std::numeric_limits<Real>::max();
 

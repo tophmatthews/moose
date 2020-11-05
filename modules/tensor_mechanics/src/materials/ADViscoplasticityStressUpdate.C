@@ -45,6 +45,11 @@ ADViscoplasticityStressUpdate::validParams()
                         1.0e12,
                         "Maximum value of equivalent stress above which an exception is thrown "
                         "instead of calculating the properties in this material.");
+  params.addParam<Real>("lower_creep_increment_limit",
+                        1.0e-15,
+                        "Lower creep increment limit below which an explicit creep step is taken "
+                        "with the gauge stress equal to the equivalent stress");
+  params.addParam<Real>("max_newton_increment", 0.1, "todo");
 
   params.addParamNamesToGroup("verbose maximum_gauge_ratio maximum_equivalent_stress", "Advanced");
   return params;
@@ -52,7 +57,7 @@ ADViscoplasticityStressUpdate::validParams()
 
 ADViscoplasticityStressUpdate::ADViscoplasticityStressUpdate(const InputParameters & parameters)
   : ADViscoplasticityStressUpdateBase(parameters),
-    ADSingleVariableReturnMappingSolution(parameters),
+    ADSingleVariableReturnMappingSolution(parameters, &_fe_problem),
     _model(parameters.get<MooseEnum>("viscoplasticity_model").getEnum<ViscoplasticityModel>()),
     _pore_shape(parameters.get<MooseEnum>("pore_shape_model").getEnum<PoreShapeModel>()),
     _pore_shape_factor(_pore_shape == PoreShapeModel::SPHERICAL ? 1.5 : std::sqrt(3.0)),
@@ -63,6 +68,8 @@ ADViscoplasticityStressUpdate::ADViscoplasticityStressUpdate(const InputParamete
     _maximum_gauge_ratio(getParam<Real>("maximum_gauge_ratio")),
     _minimum_equivalent_stress(getParam<Real>("minimum_equivalent_stress")),
     _maximum_equivalent_stress(getParam<Real>("maximum_equivalent_stress")),
+    _lower_creep_increment_limit(getParam<Real>("lower_creep_increment_limit")),
+    _max_increment(getParam<Real>("max_newton_increment")),
     _hydro_stress(0.0),
     _identity_two(RankTwoTensor::initIdentity),
     _dhydro_stress_dsigma(_identity_two / 3.0),
@@ -85,6 +92,7 @@ ADViscoplasticityStressUpdate::updateState(ADRankTwoTensor & elastic_strain_incr
     _hydro_stress = (stress(0, 0) + stress(1, 1)) / 2.0;
   else
     _hydro_stress = stress.trace() / 3.0;
+  mooseAssert(!std::isnan(_hydro_stress), "Hydrostatic stress cannot be a nan");
 
   updateIntermediatePorosity(elastic_strain_increment);
 
@@ -92,6 +100,7 @@ ADViscoplasticityStressUpdate::updateState(ADRankTwoTensor & elastic_strain_incr
   const ADRankTwoTensor dev_stress = stress.deviatoric();
   const ADReal dev_stress_squared = dev_stress.doubleContraction(dev_stress);
   const ADReal equiv_stress = dev_stress_squared == 0.0 ? 0.0 : std::sqrt(1.5 * dev_stress_squared);
+  mooseAssert(!std::isnan(equiv_stress), "Equivalent stress must not be a nan");
 
   computeStressInitialize(equiv_stress, elasticity_tensor);
 
@@ -100,19 +109,20 @@ ADViscoplasticityStressUpdate::updateState(ADRankTwoTensor & elastic_strain_incr
   _inelastic_strain[_qp] = _inelastic_strain_old[_qp];
   inelastic_strain_increment.zero();
 
-  // Protect against extremely high values of stresses calculated by other viscoplastic materials
-  if (equiv_stress > _maximum_equivalent_stress)
-    mooseException("In ",
-                   _name,
-                   ": equivalent stress (",
-                   equiv_stress,
-                   ") is higher than maximum_equivalent_stress (",
-                   _maximum_equivalent_stress,
-                   ").\nCutting time step.");
-
   // If equivalent stress is present, calculate creep strain increment
-  if (equiv_stress > _minimum_equivalent_stress)
+  if (_coefficient[_qp] && equiv_stress > _minimum_equivalent_stress)
   {
+    // Protect against extremely high values of stresses calculated by other viscoplastic materials
+    if ((_current_execute_flag == EXEC_LINEAR || _current_execute_flag == EXEC_NONLINEAR) &&
+        equiv_stress > _maximum_equivalent_stress)
+      mooseException("In ",
+                     _name,
+                     ": equivalent stress (",
+                     MetaPhysicL::raw_value(equiv_stress),
+                     ") is higher than maximum_equivalent_stress (",
+                     _maximum_equivalent_stress,
+                     ").\nCutting time step.");
+
     // Initalize stress potential
     ADReal dpsi_dgauge(0);
 
@@ -128,10 +138,13 @@ ADViscoplasticityStressUpdate::updateState(ADRankTwoTensor & elastic_strain_incr
     // Update stress due to new strain
     stress = elasticity_tensor * (elastic_strain_old + elastic_strain_increment);
 
+    mooseAssert(!std::isnan(dpsi_dgauge), "dpsi_dgauge must not be a nan");
+
     // Compute effective strain from the stress potential. Note that this is approximate and to be
     // used qualitatively
     _effective_inelastic_strain[_qp] += dpsi_dgauge * _dt;
     // Update creep strain due to currently computed inelastic strain
+
     _inelastic_strain[_qp] += inelastic_strain_increment;
   }
 
@@ -140,13 +153,19 @@ ADViscoplasticityStressUpdate::updateState(ADRankTwoTensor & elastic_strain_incr
   const ADReal new_equiv_stress =
       new_dev_stress_squared == 0.0 ? 0.0 : std::sqrt(1.5 * new_dev_stress_squared);
 
-  if (MooseUtils::relativeFuzzyGreaterThan(new_equiv_stress, equiv_stress))
+  if ((_current_execute_flag == EXEC_LINEAR || _current_execute_flag == EXEC_NONLINEAR) &&
+      MooseUtils::relativeFuzzyGreaterThan(new_equiv_stress, equiv_stress) &&
+      MooseUtils::relativeFuzzyGreaterThan(std::abs(stress.trace()) / 3.0, std::abs(_hydro_stress)))
     mooseException("In ",
                    _name,
                    ": updated equivalent stress (",
                    MetaPhysicL::raw_value(new_equiv_stress),
+                   ") and |hydrostatic stress| (",
+                   std::abs(MetaPhysicL::raw_value(stress.trace())) / 3.0,
                    ") is greater than initial equivalent stress (",
                    MetaPhysicL::raw_value(equiv_stress),
+                   ") and initial |hydrostatic stress| (",
+                   std::abs(MetaPhysicL::raw_value(_hydro_stress)),
                    "). Try decreasing max_inelastic_increment to avoid this exception.");
 
   computeStressFinalize(inelastic_strain_increment);
@@ -167,6 +186,7 @@ ADViscoplasticityStressUpdate::maximumPermissibleValue(const ADReal & effective_
 ADReal
 ADViscoplasticityStressUpdate::minimumPermissibleValue(const ADReal & effective_trial_stress) const
 {
+  // return std::max(effective_trial_stress, _hydro_stress / 49.0);
   return effective_trial_stress;
 }
 
@@ -174,7 +194,10 @@ ADReal
 ADViscoplasticityStressUpdate::computeResidual(const ADReal & equiv_stress,
                                                const ADReal & trial_gauge)
 {
-  const ADReal M = std::abs(_hydro_stress) / trial_gauge;
+  mooseAssert(trial_gauge != 0.0, "trial_gauge cannot be zero");
+  mooseAssert(!std::isnan(trial_gauge), "trial_gauge cannot be nan");
+  const ADReal M = std::min(5.0, std::abs(_hydro_stress) / trial_gauge);
+  mooseAssert(!std::isnan(M), "M cannot be a nan");
   const ADReal dM_dtrial_gauge = -M / trial_gauge;
 
   const ADReal residual_left = Utility::pow<2>(equiv_stress / trial_gauge);
@@ -183,39 +206,80 @@ ADViscoplasticityStressUpdate::computeResidual(const ADReal & equiv_stress,
   ADReal residual = residual_left;
   _derivative = dresidual_left_dtrial_gauge;
 
+  // if (_fe_problem_ptr->timeStep() == 20)
+  //   std::cout << "b " << MetaPhysicL::raw_value(_derivative) << std::endl;
+
   if (_pore_shape == PoreShapeModel::SPHERICAL)
   {
     residual *= 1.0 + _intermediate_porosity / 1.5;
     _derivative *= 1.0 + _intermediate_porosity / 1.5;
   }
 
+  // if (_fe_problem_ptr->timeStep() == 20)
+  //   std::cout << "c " << MetaPhysicL::raw_value(_derivative) << std::endl;
+
   if (_model == ViscoplasticityModel::GTN)
   {
+    mooseAssert(M < 50.0, "M must be less than 50");
     residual += 2.0 * _intermediate_porosity * std::cosh(_pore_shape_factor * M) - 1.0 -
                 Utility::pow<2>(_intermediate_porosity);
     _derivative += 2.0 * _intermediate_porosity * std::sinh(_pore_shape_factor * M) *
                    _pore_shape_factor * dM_dtrial_gauge;
+    // if (_fe_problem_ptr->timeStep() == 20)
+    //   std::cout << "dd " << MetaPhysicL::raw_value(_derivative) << " M "
+    //             << MetaPhysicL::raw_value(M) << " pore_shape_factor " << _pore_shape_factor
+    //             << " M*pore_shape_factor " << MetaPhysicL::raw_value(M * _pore_shape_factor)
+    //             << " sinh " << MetaPhysicL::raw_value(std::sinh(_pore_shape_factor * M))
+    //             << std::endl;
   }
   else
   {
     const ADReal h = computeH(_power, M);
     const ADReal dh_dM = computeH(_power, M, true);
+    mooseAssert(h != 0, "h cannot be zero");
 
     residual += _intermediate_porosity * (h + _power_factor / h) - 1.0 -
                 _power_factor * Utility::pow<2>(_intermediate_porosity);
     const ADReal dresidual_dh = _intermediate_porosity * (1.0 - _power_factor / Utility::pow<2>(h));
     _derivative += dresidual_dh * dh_dM * dM_dtrial_gauge;
+    // if (_fe_problem_ptr->timeStep() == 20)
+    //   std::cout << "ff " << MetaPhysicL::raw_value(_derivative) << std::endl;
   }
+
+  // if (_fe_problem_ptr->timeStep() == 20)
+  // {
+  //   std::cout << "d " << MetaPhysicL::raw_value(_derivative) << std::endl;
+  //   std::cout << "_intermediate_porosity " << MetaPhysicL::raw_value(_intermediate_porosity)
+  //             << " M " << MetaPhysicL::raw_value(M) << " dM_dtrial_gauge "
+  //             << MetaPhysicL::raw_value(dM_dtrial_gauge) << " dresidual_left_dtrial_gauge "
+  //             << MetaPhysicL::raw_value(dresidual_left_dtrial_gauge) << std::endl;
+  // }
 
   if (_verbose)
   {
     Moose::out << "in computeResidual:\n"
-               << "  position: " << _q_point[_qp] << " hydro_stress: " << _hydro_stress
-               << " equiv_stress: " << equiv_stress << " trial_grage: " << trial_gauge
-               << " M: " << M << std::endl;
-    Moose::out << "  residual: " << residual << "  derivative: " << _derivative << std::endl;
+               << "  position: " << _q_point[_qp]
+               << " hydro_stress: " << MetaPhysicL::raw_value(_hydro_stress)
+               << " equiv_stress: " << MetaPhysicL::raw_value(equiv_stress)
+               << " trial_grage: " << MetaPhysicL::raw_value(trial_gauge)
+               << " M: " << MetaPhysicL::raw_value(M) << std::endl;
+    Moose::out << "  residual: " << MetaPhysicL::raw_value(residual)
+               << "  derivative: " << MetaPhysicL::raw_value(_derivative) << std::endl;
   }
 
+  mooseAssert(!std::isnan(residual) || !std::isinf(MetaPhysicL::raw_value(residual)),
+              "Residual must not be a nan or inf");
+  mooseAssert(!std::isnan(residual), "Residual must not be a nan or inf");
+  mooseAssert(!std::isinf(MetaPhysicL::raw_value(residual)), "Residual must not be a nan or inf");
+  mooseAssert(!std::isnan(_derivative) || !std::isinf(MetaPhysicL::raw_value(_derivative)),
+              "Derivative must not be a nan or inf");
+
+  // scalar_increment = -_residual / computeDerivative(effective_trial_stress, scalar);
+  // scalar = scalar_old + scalar_increment;
+
+  ADReal inc_ratio = -residual / _derivative / trial_gauge;
+  if (inc_ratio > _max_increment)
+    _derivative *= std::abs(inc_ratio) / _max_increment;
   return residual;
 }
 
@@ -242,7 +306,8 @@ ADViscoplasticityStressUpdate::computeDGaugeDSigma(const ADReal & gauge_stress,
 {
   // Compute the derivative of the gauge stress with respect to the equilvalent and hydrostatic
   // stress components
-  const ADReal M = std::abs(_hydro_stress) / gauge_stress;
+  mooseAssert(gauge_stress != 0.0, "Gauge stress must be non-zero");
+  const ADReal M = std::min(5.0, std::abs(_hydro_stress) / gauge_stress);
   const ADReal h = computeH(_power, M);
 
   // Compute the derviative of the residual with respect to the hydrostatic stress
@@ -252,6 +317,7 @@ ADViscoplasticityStressUpdate::computeDGaugeDSigma(const ADReal & gauge_stress,
     const ADReal dM_dhydro_stress = M / _hydro_stress;
     if (_model == ViscoplasticityModel::GTN)
     {
+      mooseAssert(M < 50.0, "M must be less than 50");
       dresidual_dhydro_stress = 2.0 * _intermediate_porosity * std::sinh(_pore_shape_factor * M) *
                                 _pore_shape_factor * dM_dhydro_stress;
     }
@@ -292,6 +358,15 @@ ADViscoplasticityStressUpdate::computeInelasticStrainIncrement(
     const ADRankTwoTensor & dev_stress,
     const ADRankTwoTensor & stress)
 {
+  // Shortcut radial retrun solve if creep increment is really small
+  if (_dt * _coefficient[_qp] * std::pow(equiv_stress, _power) < _lower_creep_increment_limit)
+  {
+    gauge_stress = equiv_stress;
+    dpsi_dgauge = 0.0;
+    inelastic_strain_increment.zero();
+    return;
+  }
+
   // If hydrostatic stress and porosity present, compute non-linear gauge stress
   if (_intermediate_porosity == 0.0)
     gauge_stress = equiv_stress;
@@ -303,7 +378,9 @@ ADViscoplasticityStressUpdate::computeInelasticStrainIncrement(
     returnMappingSolve(equiv_stress, gauge_stress, _console);
 
   mooseAssert(gauge_stress >= equiv_stress,
-              "Gauge stress calculated in inner Newton solve is less than the equivalent stress.");
+              "Gauge stress calculated in inner Newton solve needs to be greater than the "
+              "equivalent stress.");
+  mooseAssert(gauge_stress > 0, "Gauge stress must be greater than zero");
 
   // Compute stress potential
   dpsi_dgauge = _coefficient[_qp] * std::pow(gauge_stress, _power);

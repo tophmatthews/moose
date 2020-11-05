@@ -15,6 +15,7 @@
 #include "ConsoleStreamInterface.h"
 #include "Conversion.h"
 #include "MathUtils.h"
+#include "FEProblemBase.h"
 
 #include "DualRealOps.h"
 
@@ -55,8 +56,9 @@ ADSingleVariableReturnMappingSolution::validParams()
 }
 
 ADSingleVariableReturnMappingSolution::ADSingleVariableReturnMappingSolution(
-    const InputParameters & parameters)
-  : _check_range(false),
+    const InputParameters & parameters, FEProblemBase * fe_problem_ptr)
+  : _fe_problem_ptr(fe_problem_ptr),
+    _check_range(false),
     _line_search(true),
     _bracket_solution(true),
     _internal_solve_output_on(
@@ -140,7 +142,14 @@ ADSingleVariableReturnMappingSolution::returnMappingSolve(const ADReal & effecti
 
     // Append summary and throw exception
     outputIterationSummary(iter_output.get(), _iteration);
-    mooseException(iter_output->str());
+    if (!_fe_problem_ptr)
+      mooseException(iter_output->str());
+    else
+    {
+      if (_fe_problem_ptr->getCurrentExecuteOnFlag() == EXEC_LINEAR ||
+          _fe_problem_ptr->getCurrentExecuteOnFlag() == EXEC_NONLINEAR)
+        mooseException(iter_output->str());
+    }
   }
 
   if (_internal_solve_output_on == InternalSolveOutput::ALWAYS)
@@ -184,8 +193,23 @@ ADSingleVariableReturnMappingSolution::internalSolve(const ADReal effective_tria
   while (_iteration < _max_its && !converged(_residual, reference_residual) &&
          !convergedAcceptable(_iteration, reference_residual))
   {
+    // if (_fe_problem_ptr->timeStep() == 20)
+    //   std::cout << "b scalar " << MetaPhysicL::raw_value(scalar) << " effective_trial_stress " << MetaPhysicL::raw_value(effective_trial_stress) << std::endl;
+
+    mooseAssert(computeDerivative(effective_trial_stress, scalar) != 0,
+                "Derivative cannot be zero");
     scalar_increment = -_residual / computeDerivative(effective_trial_stress, scalar);
     scalar = scalar_old + scalar_increment;
+
+    // if (_fe_problem_ptr->timeStep() == 20)
+    // {
+    //   std::cout << "c scalar " << MetaPhysicL::raw_value(scalar) << std::endl;
+    //   std::cout << " scalar_increment " << MetaPhysicL::raw_value(scalar_increment) << " residual"
+    //             << MetaPhysicL::raw_value(_residual) << " derivative"
+    //             << MetaPhysicL::raw_value(computeDerivative(effective_trial_stress, scalar))
+    //             << " scalar_old " << MetaPhysicL::raw_value(scalar_old) << " scalar "
+    //             << MetaPhysicL::raw_value(scalar) << std::endl;
+    // }
 
     if (_check_range)
       checkPermissibleRange(scalar,
@@ -281,7 +305,8 @@ ADSingleVariableReturnMappingSolution::internalSolve(const ADReal effective_tria
     _residual_history[_iteration % _num_resids] = MetaPhysicL::raw_value(_residual);
   }
 
-  if (std::isnan(_residual) || std::isinf(MetaPhysicL::raw_value(_residual)))
+  if (std::isnan(_residual) || std::isinf(MetaPhysicL::raw_value(_residual)) ||
+      std::isnan(scalar) || std::isinf(MetaPhysicL::raw_value(scalar)))
     return SolveState::NAN_INF;
 
   if (_iteration == _max_its)
@@ -390,6 +415,8 @@ ADSingleVariableReturnMappingSolution::outputIterationStep(std::stringstream * i
     *iter_output << " iteration=" << it
                  << " trial_stress=" << MetaPhysicL::raw_value(effective_trial_stress)
                  << " scalar=" << MetaPhysicL::raw_value(scalar) << " residual=" << residual
+                 << " derivative="
+                 << MetaPhysicL::raw_value(computeDerivative(effective_trial_stress, scalar))
                  << " ref_res=" << reference_residual
                  << " rel_res=" << std::abs(residual) / reference_residual
                  << " rel_tol=" << _relative_tolerance << " abs_res=" << std::abs(residual)
@@ -402,7 +429,12 @@ ADSingleVariableReturnMappingSolution::outputIterationSummary(std::stringstream 
                                                               const unsigned int total_it)
 {
   if (iter_output)
+  {
     *iter_output << "In " << total_it << " iterations the residual went from "
                  << MetaPhysicL::raw_value(_initial_residual) << " to "
-                 << MetaPhysicL::raw_value(_residual) << " in '" << _svrms_name << "'.\n";
+                 << MetaPhysicL::raw_value(_residual) << " in '" << _svrms_name << "'";
+    if (_fe_problem_ptr)
+      *iter_output << " during " << _fe_problem_ptr->getCurrentExecuteOnFlag();
+    *iter_output << ".\n";
+  }
 }

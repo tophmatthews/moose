@@ -105,6 +105,10 @@ protected:
   /// Maximum value of equivalent stress above which an exception is thrown
   const Real _maximum_equivalent_stress;
 
+  const Real _lower_creep_increment_limit;
+
+  const Real _max_increment;
+
   /// Container for hydrostatic stress
   ADReal _hydro_stress;
 

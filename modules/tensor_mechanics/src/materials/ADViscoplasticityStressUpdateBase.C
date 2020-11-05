@@ -72,8 +72,8 @@ Real
 ADViscoplasticityStressUpdateBase::computeTimeStepLimit()
 {
   const Real scalar_inelastic_strain_incr =
-      MetaPhysicL::raw_value(_effective_inelastic_strain[_qp]) -
-      _effective_inelastic_strain_old[_qp];
+      std::abs(MetaPhysicL::raw_value(_effective_inelastic_strain[_qp]) -
+               _effective_inelastic_strain_old[_qp]);
 
   if (!scalar_inelastic_strain_incr)
     return std::numeric_limits<Real>::max();
@@ -94,4 +94,21 @@ ADViscoplasticityStressUpdateBase::updateIntermediatePorosity(
   // the one that we're about to calculate
   _intermediate_porosity =
       (1.0 - _porosity_old[_qp]) * inelastic_volumetric_increment.trace() + _porosity_old[_qp];
+  _intermediate_porosity = std::max(_intermediate_porosity, 1.0e-10);
+
+  if (_intermediate_porosity < 0.0 || _intermediate_porosity > 1.0)
+  {
+    // if (_current_execute_flag == EXEC_LINEAR || _current_execute_flag == EXEC_NONLINEAR)
+    //   mooseException("In ",
+    //                  _name,
+    //                  ": Intermediate porosity is not between zero and one: ",
+    //                  _intermediate_porosity,
+    //                  ".");
+    // else
+    _intermediate_porosity = _porosity_old[_qp];
+  }
+
+  // mooseAssert(_intermediate_porosity > 0.0, "Intermediate porosity must be greater than zero");
+  // mooseAssert(_intermediate_porosity < 1.0, "Intermediate porosity must be less than one");
+  mooseAssert(!std::isnan(_intermediate_porosity), "Intermediate porosity must not be a nan");
 }
