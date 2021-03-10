@@ -944,14 +944,15 @@ Assembly::computeAffineMapAD(const Elem * elem,
         unsigned dimension = 0;
         if (_computing_jacobian)
           for (const auto & disp_num : _displacements)
-            Moose::derivInsert(elem_point(dimension++).derivatives(),
+            if (node.n_dofs(sys_num, disp_num))
+              Moose::derivInsert(elem_point(dimension++).derivatives(),
 #ifdef MOOSE_GLOBAL_AD_INDEXING
-                               node.dof_number(sys_num, disp_num, 0)
+                                 node.dof_number(sys_num, disp_num, 0)
 #else
-                               disp_num * _sys.getMaxVarNDofsPerElem() + i
+                                 disp_num * _sys.getMaxVarNDofsPerElem() + i
 #endif
-                                   ,
-                               1.);
+                                     ,
+                                 1.);
 
         _ad_q_points[p].add_scaled(elem_point, phi_map[i][p]);
       }
@@ -1064,14 +1065,15 @@ Assembly::computeSinglePointMapAD(const Elem * elem,
         unsigned dimension = 0;
         if (_computing_jacobian)
           for (const auto & disp_num : _displacements)
-            Moose::derivInsert(elem_point(dimension++).derivatives(),
+            if (node.n_dofs(sys_num, disp_num))
+              Moose::derivInsert(elem_point(dimension++).derivatives(),
 #ifdef MOOSE_GLOBAL_AD_INDEXING
-                               node.dof_number(sys_num, disp_num, 0)
+                                 node.dof_number(sys_num, disp_num, 0)
 #else
-                               disp_num * _sys.getMaxVarNDofsPerElem() + i
+                                 disp_num * _sys.getMaxVarNDofsPerElem() + i
 #endif
-                                   ,
-                               1.);
+                                     ,
+                                 1.);
 
         _ad_dxyzdxi_map[p].add_scaled(elem_point, dphidxi_map[i][p]);
 
