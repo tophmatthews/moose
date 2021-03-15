@@ -83,6 +83,13 @@ ThermalContactAction::validParams()
   params.addParam<VariableName>("mapped_primary_gap_offset",
                                 "Offset to gap distance mapped from primary side");
 
+  params.addParam<bool>("use_old_secondary_temperature",
+                        false,
+                        "Flag to optionally use the old temperature for the secondary side during "
+                        "the thermal contact calculation.");
+  params.addParam<bool>(
+      "use_old_conductance", false, "Flag to optionally use the old conducance value for the gap.");
+
   params += GapConductance::actionParameters();
   params += GapConductanceConstant::actionParameters();
 

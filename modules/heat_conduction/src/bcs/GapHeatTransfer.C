@@ -78,6 +78,13 @@ GapHeatTransfer::validParams()
   params.addCoupledVar("gap_distance", "Distance across the gap");
   params.addCoupledVar("gap_temp", "Temperature on the other side of the gap");
 
+  params.addParam<bool>("use_old_secondary_temperature",
+                        false,
+                        "Flag to optionally use the old temperature for the secondary side during "
+                        "the thermal contact calculation.");
+  params.addParam<bool>(
+      "use_old_conductance", false, "Flag to optionally use the old conducance value for the gap.");
+
   return params;
 }
 
@@ -87,10 +94,19 @@ GapHeatTransfer::GapHeatTransfer(const InputParameters & parameters)
                                                                             GapConductance::PLATE)),
     _quadrature(getParam<bool>("quadrature")),
     _secondary_flux(!_quadrature ? &_sys.getVector("secondary_flux") : NULL),
-    _gap_conductance(getMaterialProperty<Real>("gap_conductance" +
-                                               getParam<std::string>("appended_property_name"))),
-    _gap_conductance_dT(getMaterialProperty<Real>(
-        "gap_conductance" + getParam<std::string>("appended_property_name") + "_dT")),
+    _use_old_secondary_temp(getParam<bool>("use_old_secondary_temperature")),
+    _use_old_conductance(getParam<bool>("use_old_conductance")),
+    _gap_conductance(
+        _use_old_conductance
+            ? getMaterialPropertyOld<Real>("gap_conductance" +
+                                           getParam<std::string>("appended_property_name"))
+            : getMaterialProperty<Real>("gap_conductance" +
+                                        getParam<std::string>("appended_property_name"))),
+    _gap_conductance_dT(
+        _use_old_conductance
+            ? getZeroMaterialProperty<Real>()
+            : getMaterialProperty<Real>("gap_conductance" +
+                                        getParam<std::string>("appended_property_name") + "_dT")),
     _min_gap(getParam<Real>("min_gap")),
     _min_gap_order(getParam<unsigned int>("min_gap_order")),
     _max_gap(getParam<Real>("max_gap")),
@@ -438,7 +454,11 @@ GapHeatTransfer::computeGapValues()
 
       _secondary_side = _pinfo->_side;
       _secondary_side_phi = &_pinfo->_side_phi;
-      _gap_temp = _variable->getValue(_secondary_side, *_secondary_side_phi);
+      if (_use_old_secondary_temp)
+        mooseError("not yet");
+      // _gap_temp = _variable->getOldValue(_secondary_side, *_secondary_side_phi);
+      else
+        _gap_temp = _variable->getValue(_secondary_side, *_secondary_side_phi);
 
       Real tangential_tolerance = _penetration_locator->getTangentialTolerance();
       if (tangential_tolerance != 0.0)

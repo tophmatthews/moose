@@ -172,6 +172,14 @@ GapConductance::GapConductance(const InputParameters & parameters)
 }
 
 void
+GapConductance::initQpStatefulProperties()
+{
+  _gap_conductance[_qp] = 0.0;
+  _gap_conductance_dT[_qp] = 0.0;
+  _gap_thermal_conductivity[_qp] = 0.0;
+}
+
+void
 GapConductance::initialSetup()
 {
   /// set generated from the passed in vector of subdomain names

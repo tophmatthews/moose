@@ -65,6 +65,7 @@ public:
 
 protected:
   virtual void computeQpProperties() override;
+  virtual void initQpStatefulProperties() override;
 
   /**
    * Override this to compute the conductance at _qp

@@ -56,6 +56,9 @@ protected:
 
   NumericVector<Number> * _secondary_flux;
 
+  const bool _use_old_secondary_temp;
+  const bool _use_old_conductance;
+
   const MaterialProperty<Real> & _gap_conductance;
   const MaterialProperty<Real> & _gap_conductance_dT;
 
