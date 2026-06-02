@@ -91,6 +91,21 @@ DefaultNonlinearConvergence::checkRelativeConvergence(const unsigned int /*it*/,
     return false;
 }
 
+bool
+DefaultNonlinearConvergence::checkAbsoluteConvergence(const unsigned int iter,
+                                                      const Real fnorm,
+                                                      const Real abs_tol,
+                                                      std::ostringstream & oss)
+{
+  if ((iter >= _nl_forced_its) && fnorm < abs_tol)
+  {
+    oss << "Converged due to residual norm " << fnorm << " < " << abs_tol << '\n';
+    return true;
+  }
+  else
+    return false;
+}
+
 Convergence::MooseConvergenceStatus
 DefaultNonlinearConvergence::checkConvergence(unsigned int iter)
 {
@@ -184,11 +199,8 @@ DefaultNonlinearConvergence::checkConvergence(unsigned int iter)
     oss << "Failed to converge, residual norm is NaN\n";
     status = MooseConvergenceStatus::DIVERGED;
   }
-  else if ((iter >= _nl_forced_its) && fnorm < abs_tol)
-  {
-    oss << "Converged due to residual norm " << fnorm << " < " << abs_tol << '\n';
+  else if (checkAbsoluteConvergence(iter, fnorm, abs_tol, oss))
     status = MooseConvergenceStatus::CONVERGED;
-  }
   else if (nfuncs >= max_funcs)
   {
     oss << "Exceeded maximum number of residual evaluations: " << nfuncs << " > " << max_funcs

@@ -55,9 +55,9 @@ public:
 protected:
   virtual void nonlinearConvergenceSetup() override;
 
-  virtual bool checkRelativeConvergence(const unsigned int it,
+  virtual bool checkRelativeConvergence(const unsigned int iter,
                                         const Real fnorm,
-                                        const Real the_residual,
+                                        const Real initial_residual_before_preset_bcs,
                                         const Real rtol,
                                         const Real abstol,
                                         std::ostringstream & oss) override;
@@ -65,19 +65,40 @@ protected:
   /**
    * Check the convergence by comparing the norm of each variable's residual separately against
    * its reference variable's norm. Only consider the solution converged if all
-   * variables are converged individually using either a relative or absolute
-   * criterion.
+   * variables are converged individually using a relative criterion.
+   * @param iter Iteration number
    * @param fnorm Function norm (norm of full residual vector)
-   * @param abstol Absolute convergence tolerance
+   * @param initial_residual_before_preset_bcs Initial norm of full residual vector before applying
+   * preset bcs
    * @param rtol Relative convergence tolerance
-   * @param initial_residual_before_preset_bcs Initial norm of full residual vector
-   *                                           before applying preset bcs
+   * @param abstol Absolute convergence tolerance
    * @return true if all variables are converged
    */
-  bool checkConvergenceIndividVars(const Real fnorm,
-                                   const Real abstol,
-                                   const Real rtol,
-                                   const Real initial_residual_before_preset_bcs);
+  bool checkRelativeConvergenceIndividVars(const unsigned int iter,
+                                           const Real fnorm,
+                                           const Real initial_residual_before_preset_bcs,
+                                           const Real rtol,
+                                           const Real abstol,
+                                           std::ostringstream & oss);
+
+  virtual bool checkAbsoluteConvergence(const unsigned int iter,
+                                        const Real fnorm,
+                                        const Real abstol,
+                                        std::ostringstream & oss) override;
+
+  /**
+   * Check the convergence by comparing the norm of each variable's residual separately against
+   * its reference variable's norm. Only consider the solution converged if all
+   * variables are converged individually using an absolute criterion.
+   * @param iter Iteration number
+   * @param fnorm Function norm (norm of full residual vector)
+   * @param abstol Absolute convergence tolerance
+   * @return true if all variables are converged
+   */
+  bool checkAbsoluteConvergenceIndividVars(const unsigned int iter,
+                                           const Real fnorm,
+                                           const Real abstol,
+                                           std::ostringstream & oss);
 
   ///@{
   /// List of solution variable names whose reference residuals will be stored,
@@ -130,6 +151,9 @@ protected:
 
   /// Container for convergence treatment when the reference residual is zero
   const enum class ZeroReferenceType { ZERO_TOLERANCE, RELATIVE_TOLERANCE } _zero_ref_type;
+
+  /// Bool to unscale the residual before convergence checks and screen output
+  const bool _unscale_the_residual;
 
   /// Flag to optionally perform normalization of residual by reference residual before or after L2 norm is computed
   bool _local_norm;

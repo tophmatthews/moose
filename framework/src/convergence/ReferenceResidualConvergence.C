@@ -44,6 +44,7 @@ ReferenceResidualConvergence::ReferenceResidualConvergence(const InputParameters
     _converge_on(getParam<std::vector<NonlinearVariableName>>("converge_on")),
     _zero_ref_type(
         getParam<MooseEnum>("zero_reference_residual_treatment").getEnum<ZeroReferenceType>()),
+    _unscale_the_residual(getParam<bool>("unscale_the_residual")),
     _reference_vector_tag_id(Moose::INVALID_TAG_ID),
     _initialized(false)
 {
@@ -380,13 +381,25 @@ ReferenceResidualConvergence::updateReferenceResidual()
       auto div = _current_nl_sys.RHS().clone();
       *div /= *ref;
       resid = Utility::pow<2>(s.calculate_norm(*div, _soln_vars[i], _norm_type));
+      if (_unscale_the_residual)
+      {
+        mooseAssert(_scaling_factors[i], "Scaling factor must not be zero");
+        resid /= Utility::pow<2>(_scaling_factors[i]);
+      }
     }
     else
     {
       resid = Utility::pow<2>(s.calculate_norm(_current_nl_sys.RHS(), _soln_vars[i], _norm_type));
+      if (_unscale_the_residual)
+      {
+        mooseAssert(_scaling_factors[i], "Scaling factor must not be zero");
+        resid /= Utility::pow<2>(_scaling_factors[i]);
+      }
       if (_reference_vector)
       {
-        const auto ref_resid = s.calculate_norm(*_reference_vector, _soln_vars[i], _norm_type);
+        auto ref_resid = s.calculate_norm(*_reference_vector, _soln_vars[i], _norm_type);
+        if (_unscale_the_residual)
+          ref_resid /= Utility::pow<2>(_scaling_factors[i]);
         _group_ref_resid[group] += Utility::pow<2>(ref_resid);
       }
     }
@@ -399,9 +412,10 @@ ReferenceResidualConvergence::updateReferenceResidual()
   {
     for (unsigned int i = 0; i < _ref_resid_vars.size(); ++i)
     {
-      const auto ref_resid =
-          as.calculate_norm(*as.current_local_solution, _ref_resid_vars[i], _norm_type) *
-          _scaling_factors[i];
+      auto ref_resid =
+          as.calculate_norm(*as.current_local_solution, _ref_resid_vars[i], _norm_type);
+      if (!_unscale_the_residual)
+        ref_resid *= _scaling_factors[i];
       _group_ref_resid[_variable_group_num_index[i]] += Utility::pow<2>(ref_resid);
     }
   }
@@ -467,61 +481,108 @@ ReferenceResidualConvergence::nonlinearConvergenceSetup()
 }
 
 bool
-ReferenceResidualConvergence::checkConvergenceIndividVars(
+ReferenceResidualConvergence::checkRelativeConvergenceIndividVars(
+    const unsigned int iter,
     const Real fnorm,
-    const Real abstol,
+    const Real initial_residual_before_preset_bcs,
     const Real rtol,
-    const Real initial_residual_before_preset_bcs)
+    const Real abstol,
+    std::ostringstream & oss)
 {
   // Convergence is checked via:
   // 1) if group residual is less than group reference residual by relative tolerance
-  // 2) if group residual is less than absolute tolerance
-  // 3) if group reference residual is zero and:
-  //   3.1) Convergence type is ZERO_TOLERANCE and group residual is zero (rare, but possible, and
+  // 2) if group reference residual is zero and:
+  //   2.1) Convergence type is ZERO_TOLERANCE and group residual is zero (rare, but possible, and
   //        historically implemented that way)
-  //   3.2) Convergence type is RELATIVE_TOLERANCE and group residual
+  //   2.2) Convergence type is RELATIVE_TOLERANCE and group residual
   //        is less than relative tolerance. (i.e., using the relative tolerance to check group
   //        convergence in an absolute way)
 
-  bool convergedRelative = true;
-  if (_group_resid.size() > 0)
-  {
-    for (unsigned int i = 0; i < _group_resid.size(); ++i)
-      convergedRelative &=
-          (_group_resid[i] < _group_ref_resid[i] * rtol || _group_resid[i] < abstol ||
-           (_group_ref_resid[i] == 0.0 &&
-            ((_zero_ref_type == ZeroReferenceType::ZERO_TOLERANCE && _group_resid[i] == 0.0) ||
-             (_zero_ref_type == ZeroReferenceType::RELATIVE_TOLERANCE &&
-              _group_resid[i] <= rtol))));
-  }
+  if (!_group_resid.size())
+    return DefaultNonlinearConvergence::checkRelativeConvergence(
+        iter, fnorm, initial_residual_before_preset_bcs, rtol, abstol, oss);
 
-  else if (fnorm > initial_residual_before_preset_bcs * rtol)
-    convergedRelative = false;
+  bool convergedRelative = true;
+  for (unsigned int i = 0; i < _group_resid.size(); ++i)
+    convergedRelative &=
+        (_group_resid[i] < _group_ref_resid[i] * rtol ||
+         (_group_ref_resid[i] == 0.0 &&
+          ((_zero_ref_type == ZeroReferenceType::ZERO_TOLERANCE && _group_resid[i] == 0.0) ||
+           (_zero_ref_type == ZeroReferenceType::RELATIVE_TOLERANCE && _group_resid[i] <= rtol))));
 
   return convergedRelative;
 }
 
 bool
-ReferenceResidualConvergence::checkRelativeConvergence(const unsigned int it,
+ReferenceResidualConvergence::checkRelativeConvergence(
+    const unsigned int iter,
+    const Real fnorm,
+    const Real initial_residual_before_preset_bcs,
+    const Real rtol,
+    const Real abstol,
+    std::ostringstream & oss)
+{
+  if (iter < _nl_forced_its)
+    return false;
+
+  if (checkRelativeConvergenceIndividVars(
+          iter, fnorm, initial_residual_before_preset_bcs, rtol, abstol, oss))
+  {
+    oss << "Converged due to relative tolerance: Group residual is less than the reference "
+           "residual by the rel_tol ("
+        << rtol << ")\n";
+    return true;
+  }
+  else if (iter >= _accept_iters &&
+           checkRelativeConvergenceIndividVars(
+               iter, fnorm, initial_residual_before_preset_bcs, rtol * _accept_mult, abstol, oss))
+  {
+    oss << "Converged due to relative tolerance after acceptible iterations: Group residual is "
+           "less than the reference residual by the ACCEPTABLE rel_tol ("
+        << rtol * _accept_mult << ")\n";
+    _console << "Converged due to ACCEPTABLE tolerances" << std::endl;
+    return true;
+  }
+
+  return false;
+}
+
+bool
+ReferenceResidualConvergence::checkAbsoluteConvergenceIndividVars(const unsigned int iter,
+                                                                  const Real fnorm,
+                                                                  const Real abstol,
+                                                                  std::ostringstream & oss)
+{
+  if (!_group_resid.size())
+    return DefaultNonlinearConvergence::checkAbsoluteConvergence(iter, fnorm, abstol, oss);
+
+  bool convergedAbsolute = true;
+  for (unsigned int i = 0; i < _group_resid.size(); ++i)
+    convergedAbsolute &= _group_resid[i] < abstol;
+  return convergedAbsolute;
+}
+
+bool
+ReferenceResidualConvergence::checkAbsoluteConvergence(const unsigned int iter,
                                                        const Real fnorm,
-                                                       const Real the_residual,
-                                                       const Real rtol,
                                                        const Real abstol,
                                                        std::ostringstream & oss)
 {
-  if (checkConvergenceIndividVars(fnorm, abstol, rtol, the_residual))
+  if (iter < _nl_forced_its)
+    return false;
+
+  if (checkAbsoluteConvergenceIndividVars(iter, fnorm, abstol, oss))
   {
-    oss << "Converged due to function norm " << fnorm << " < relative tolerance (" << rtol
-        << ") or absolute tolerance (" << abstol << ") for all solution variables\n";
+    oss << "Converged due to absolute tolerance: Group residual is less the abstol (" << abstol
+        << ")\n";
     return true;
   }
-  else if (it >= _accept_iters &&
-           checkConvergenceIndividVars(
-               fnorm, abstol * _accept_mult, rtol * _accept_mult, the_residual))
+  else if (iter >= _accept_iters &&
+           checkAbsoluteConvergenceIndividVars(iter, fnorm, abstol * _accept_mult, oss))
   {
-    oss << "Converged due to function norm " << fnorm << " < acceptable relative tolerance ("
-        << rtol * _accept_mult << ") or acceptable absolute tolerance (" << abstol * _accept_mult
-        << ") for all solution variables\n";
+    oss << "Converged due to absolute tolerance after acceptible iterations: Group residual is "
+           "less than the ACCEPTABLE abstol ("
+        << abstol * _accept_mult << ")\n";
     _console << "Converged due to ACCEPTABLE tolerances" << std::endl;
     return true;
   }
